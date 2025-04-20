@@ -1,0 +1,92 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+env/
+venv/
+ENV/
+.venv/
+.ENV/
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+coverage.xml
+*,cover
+.pytest_cache/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# Alembic (keep your versions under version control!)
+# If you want to ignore only the auto‐generated env.py, list it explicitly:
+
+migrations/
+alembic
+alembic.ini
+app/main-old.py
+app/scripts/generate_encryption_key.py
+
+# SQLAlchemy SQLite files
+*.db
+*.sqlite3
+
+# Logs and local files
+*.log
+logs/
+
+# dotenv environment variables file
+.env
+.env.*.local
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Mac
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+ ```
+
+**Key entries**  
+- **`__pycache__/`, `*.pyc`**: Python cache.  
+- **`venv/`, `.env`**: Don’t commit your virtualenv or secrets.  
+- **`alembic/versions`**: keep—so your migration history is tracked.  
+- **`.vscode/`, `.idea/`**: local editor settings.  
+- **`*.db`**: SQLite files (if you ever use SQLite for quick tests).  
+
+Feel free to adjust (e.g. add `*.log` or other temp files) as your project grows.
