@@ -1,9 +1,9 @@
 import uuid
-from datetime import datetime
-from sqlalchemy import Column, String, Text, Integer, DateTime, JSON, ForeignKey, func
+from sqlalchemy import Column, String, Text, Integer, DateTime, JSON, ForeignKey,Enum, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship
 from app.db.deps import Base
+from app.utils.enums import MaterialStatus
 
 
 class StudyMaterial(Base):
@@ -17,6 +17,9 @@ class StudyMaterial(Base):
     content = Column(Text, nullable=False)
     processed_content = Column(JSON, nullable=True)
     page_count = Column(Integer, nullable=False)
+    status = Column(Enum(MaterialStatus), 
+                    nullable=False, 
+                    default=MaterialStatus.processing)
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -24,4 +27,4 @@ class StudyMaterial(Base):
     )
 
     user = relationship("User", back_populates="study_materials")
-    assessment_sessions = relationship("AssessmentSession", back_populates="material")
+    assessment_sessions = relationship("AssessmentSession", back_populates="material", cascade="all, delete-orphan")

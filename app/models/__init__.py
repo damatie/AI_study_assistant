@@ -6,6 +6,8 @@ from .usage_tracking import UsageTracking
 from .study_material import StudyMaterial
 from .assessment_session import AssessmentSession
 from .submission import Submission
+from .subscription import Subscription
+from .transaction import Transaction
 
 __all__ = [
     "Plan",
@@ -14,4 +16,6 @@ __all__ = [
     "StudyMaterial",
     "AssessmentSession",
     "Submission",
+    "Subscription",
+    "Transaction"
 ]

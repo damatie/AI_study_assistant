@@ -1,5 +1,5 @@
+import os
 import aiosmtplib
-from email.message import EmailMessage
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -7,8 +7,9 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from app.core.config import settings
 
 # set up Jinja2 to load from app/services/templates/
+TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 env = Environment(
-    loader=FileSystemLoader("app/services/mail_handler/templates"),
+    loader=FileSystemLoader(TEMPLATE_DIR),
     autoescape=select_autoescape(["html", "xml"]),
 )
 

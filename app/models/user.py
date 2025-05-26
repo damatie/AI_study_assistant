@@ -1,6 +1,5 @@
 import uuid
 import enum
-from datetime import datetime, timezone
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship
@@ -16,6 +15,8 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    first_name = Column(String, nullable=False)
+    last_name  = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
     role = Column(Enum(Role), nullable=False, default=Role.user)
@@ -28,6 +29,10 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     plan = relationship("Plan", back_populates="users")
-    usage_tracking = relationship("UsageTracking", back_populates="user")
-    study_materials = relationship("StudyMaterial", back_populates="user")
-    assessment_sessions = relationship("AssessmentSession", back_populates="user")
+    subscriptions = relationship(
+        "Subscription", back_populates="user", cascade="all, delete-orphan"
+    )
+    transactions = relationship("Transaction", back_populates="user", cascade="all, delete-orphan")
+    usage_tracking = relationship("UsageTracking", back_populates="user", cascade="all, delete-orphan")
+    study_materials = relationship("StudyMaterial", back_populates="user", cascade="all, delete-orphan")
+    assessment_sessions = relationship("AssessmentSession", back_populates="user", cascade="all, delete-orphan")

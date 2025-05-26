@@ -13,6 +13,6 @@ class UsageTracking(Base):
     period_start = Column(Date, nullable=False)
     uploads_count = Column(Integer, default=0, nullable=False)
     assessments_count = Column(Integer, default=0, nullable=False)
-    questions_count = Column(Integer, default=0, nullable=False)
+    asked_questions_count = Column(Integer, default=0, nullable=False)
 
     user = relationship("User", back_populates="usage_tracking")

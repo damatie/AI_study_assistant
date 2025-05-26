@@ -38,4 +38,4 @@ class AssessmentSession(Base):
 
     user = relationship("User", back_populates="assessment_sessions")
     material = relationship("StudyMaterial", back_populates="assessment_sessions")
-    submissions = relationship("Submission", back_populates="session")
+    submissions = relationship("Submission", back_populates="session", cascade="all, delete-orphan")

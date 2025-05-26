@@ -27,6 +27,7 @@ class Plan(Base):
     pages_per_upload_limit = Column(Integer, nullable=False)
     monthly_assessment_limit = Column(Integer, nullable=False)
     questions_per_assessment = Column(Integer, nullable=False)
+    monthly_ask_question_limit = Column(Integer, nullable=False, default=0)
     summary_detail = Column(Enum(SummaryDetail), nullable=False)
     ai_feedback_level = Column(Enum(AIFeedbackLevel), nullable=False)
 
