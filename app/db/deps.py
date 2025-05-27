@@ -16,8 +16,10 @@ Base = declarative_base()
 
 # Dependency
 async def get_db():
+    """
+    Dependency that yields a new AsyncSession per request.
+    The session is closed automatically when the request is done.
+    """
     async with AsyncSessionLocal() as session:
-        try:
             yield session
-        finally:
-            await session.close()
+        

@@ -19,7 +19,7 @@ async def renew_subscription_for_user(
     Returns the active subscription, even if downgraded on failure.
     """
     today = date.today()
-    # 1. Find a subscription covering today
+    # 1.  Look for an already-active subscription
     q = await db.execute(
         select(Subscription)
         .where(
@@ -51,9 +51,9 @@ async def renew_subscription_for_user(
 
     # 4. Handle free vs paid
     if plan.price_pence == 0:
-        # Freemium: auto-renew success
+        # FREEMIUM: auto‐renew without any transaction record
         new_sub = Subscription(
-            id=str(uuid.uuid4()),
+            id=uuid.uuid4(),
             user_id=user.id,
             plan_id=plan.id,
             period_start=start,
@@ -61,29 +61,26 @@ async def renew_subscription_for_user(
             status=SubscriptionStatus.active,
         )
         db.add(new_sub)
-        # Record zero‑amount transaction
-        txn = Transaction(
-            id=str(uuid.uuid4()),
-            user_id=user.id,
-            subscription=new_sub,
-            amount_pence=0,
-            currency="GBP",
-            status=TransactionStatus.success
-        )
-        db.add(txn)
         await db.commit()
+        await db.refresh(new_sub)
         return new_sub
 
-    # Paid plan: create pending transaction
+    # PAID PLAN: create a pending‐payment transaction
+    #  give it a placeholder reference so it is never NULL
+    txn_ref = str(uuid.uuid4())
     txn = Transaction(
-        id=str(uuid.uuid4()),
-        user_id=user.id,
-        amount_pence=plan.price_pence,
-        currency="GBP",
-        status=TransactionStatus.pending
+        id            = uuid.uuid4(),
+        user_id       = user.id,
+        subscription_id=None,            # link after success
+        reference     = txn_ref,
+        authorization_url=None,
+        amount_pence  = plan.price_pence,
+        currency      = "GBP",
+        status        = TransactionStatus.pending,
     )
     db.add(txn)
     await db.commit()
+    await db.refresh(txn)
     # TODO: replace with real payment gateway call
     payment_ok = await fake_gateway_charge(user, plan.price_pence)
 
