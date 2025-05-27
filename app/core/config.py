@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str
     RESEND_FROM_EMAIL: str
 
+    # Payment gateway settings
+    PAYSTACK_SECRET_KEY:str
+
 
 # Try to instantiate with error handling
 try:

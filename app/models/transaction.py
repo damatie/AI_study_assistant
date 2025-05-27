@@ -14,6 +14,8 @@ class Transaction(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     subscription_id = Column(UUID(as_uuid=True), ForeignKey("subscriptions.id"), nullable=True)
+    reference         = Column(String, nullable=False, unique=True)
+    authorization_url = Column(String, nullable=True)
     amount_pence = Column(Integer, nullable=False)
     currency = Column(String, nullable=False, default="GBP")
     status = Column(Enum(TransactionStatus), nullable=False)
