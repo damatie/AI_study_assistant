@@ -21,6 +21,9 @@ class Settings(BaseSettings):
         r"C:/Users/Edafe Maxwell/AppData/Local/Programs/Tesseract-OCR/tesseract.exe"
     )
 
+    # App Logo
+    LOGO: str =  'https://res.cloudinary.com/webmataz/image/upload/v1748798978/Assets/logo_hkakvj.png'
+
     # JWT settings
     JWT_SECRET: str
     JWT_ALGORITHM: str

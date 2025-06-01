@@ -41,8 +41,15 @@ from app.core.security import (
 )
 from app.services.mail_handler_service.mailer import (
     send_verification_email,
-    send_reset_password_email,
+    # send_reset_password_email,
 )
+from app.services.mail_handler_service.mailer_resend import (
+    send_reset_password_email,
+    send_verification_email,
+    send_welcome_email
+)
+
+
 from app.core.response import error_response, success_response, ResponseModel
 from app.services.track_subscription_service.handle_track_subscription import (
     renew_subscription_for_user,
@@ -100,7 +107,7 @@ async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
     await db.refresh(user)
 
     # send the OTP via email to user.email
-    await send_verification_email(user.email, code)
+    await send_verification_email(user.email, code, user.first_name)
     await renew_subscription_for_user(user, db)
 
     return success_response(
@@ -236,9 +243,12 @@ async def verify_email(
     ):
         raise HTTPException(400, "Invalid or expired code")
 
+    
     user.is_email_verified = True
     user.email_verification_secret = None
     await db.commit()
+
+    await send_welcome_email(user.email, user.first_name)
     return success_response(
         msg="Email verified successfully", data=None, status_code=200
     )
@@ -260,7 +270,7 @@ async def forgot_password(
     await db.commit()
 
     # send `code` via email
-    await send_reset_password_email(user.email, code)
+    await send_reset_password_email(user.email, code, user.first_name)
     return success_response(msg="Password reset code sent", data=None, status_code=200)
 
 
@@ -304,7 +314,7 @@ async def resend_verification(
 
     # 4. Send email
     code = get_totp_code(secret, interval=600)
-    await send_verification_email(user.email, code)
+    await send_verification_email(user.email, code, user.first_name)
 
     return success_response(msg="Verification code resent to your email")
 
@@ -327,7 +337,7 @@ async def resend_reset_password(
 
     # 3. Send email
     code = get_totp_code(secret, interval=600)
-    await send_reset_password_email(user.email, code)
+    await send_reset_password_email(user.email, code, user.first_name)
 
     return success_response(msg="Password reset code resent to your email")
 

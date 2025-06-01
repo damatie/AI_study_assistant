@@ -55,6 +55,7 @@ alembic
 alembic.ini
 app/main-old.py
 app/scripts/generate_encryption_key.py
+reset_password_old.html
 
 # SQLAlchemy SQLite files
 *.db
