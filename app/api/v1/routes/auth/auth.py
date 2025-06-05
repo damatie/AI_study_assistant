@@ -1,17 +1,14 @@
 # app/routes/auth.py
 
-from datetime import date
 import secrets
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.models.subscription import Subscription
-from app.schemas.auth.auth_schema import EmailVerificationCodeRequest, LoginRequest, RefreshTokenRequest, Token, UpdatePasswordRequest, UserProfile
+from app.schemas.auth.auth_schema import EmailVerificationCodeRequest, LoginRequest, RefreshTokenRequest, Token
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from jose import JWTError, jwt
-from app.models.plan import Plan as PlanModel
 
 from app.db.deps import get_db
 from app.models.user import Role, User
@@ -54,7 +51,6 @@ from app.core.response import error_response, success_response, ResponseModel
 from app.services.track_subscription_service.handle_track_subscription import (
     renew_subscription_for_user,
 )
-from app.utils.enums import SubscriptionStatus
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")

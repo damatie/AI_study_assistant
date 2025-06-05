@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1.routes.auth.auth import router as auth_router
 from app.api.v1.routes.user.user import router as user_router
 from app.api.v1.routes.subscription.subscription import router as subscription_router
+from app.api.v1.routes.open.ipinfo import router as ipinfo_router
 
 router = APIRouter()
 
@@ -14,3 +15,7 @@ router.include_router(user_router)
 
 # Subscription routes
 router.include_router(subscription_router)
+
+
+# Get ipinfo routes
+router.include_router(ipinfo_router)
