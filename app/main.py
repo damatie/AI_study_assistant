@@ -2,7 +2,6 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 import os
-import PyPDF2
 from fastapi.exceptions import (
     HTTPException as StarletteHTTPException,
     RequestValidationError,
@@ -10,12 +9,7 @@ from fastapi.exceptions import (
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Literal
-import google.generativeai as genai
 import pytesseract
-from pdf2image import convert_from_path
-from PIL import Image
-import io
-import tempfile
 import uuid
 import json
 from datetime import datetime
@@ -28,7 +22,7 @@ from app.core.config import settings
 #
 
 from contextlib import asynccontextmanager
-import logging, os, io, tempfile, uuid, json
+import logging, os, uuid, json
 from datetime import datetime, timezone
 
 from fastapi import (

@@ -45,8 +45,15 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str
     RESEND_FROM_EMAIL: str
 
+    APP_URL: str
+
     # Payment gateway settings
-    PAYSTACK_SECRET_KEY:str
+    PAYSTACK_SECRET_KEY: str
+    PAYSTACK_PUBLIC_KEY: str
+    PAYSTACK_WEBHOOK_SECRET: str
+    STRIPE_SECRET_KEY: str
+    STRIPE_PUBLIC_KEY: str
+    STRIPE_WEBHOOK_SECRET: str
 
 
 # Try to instantiate with error handling
