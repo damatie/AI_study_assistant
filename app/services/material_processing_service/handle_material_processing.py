@@ -5,8 +5,6 @@ import json
 import logging
 from typing import Any, Dict, List, Tuple
 import PyPDF2
-from pdf2image import convert_from_path
-from PIL import Image
 
 from app.core.genai_client import get_gemini_model
 
