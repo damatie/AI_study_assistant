@@ -82,7 +82,13 @@ async def ask_question(
             return error_response(
                 msg="Study material not found or access denied", status_code=404
             )
-        ctx = material.content
+        # Use processed markdown content for better tutoring context
+        ctx = material.processed_content or material.content or ""
+        
+        # Clean markdown for better AI context if we have markdown content
+        if material.processed_content:
+            from app.services.material_processing_service.markdown_parser import clean_markdown_for_context
+            ctx = clean_markdown_for_context(material.processed_content)
 
     # 4. Generate the answer
     answer = await chat_with_ai(request.question, ctx)

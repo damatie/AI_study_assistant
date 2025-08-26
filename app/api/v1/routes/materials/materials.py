@@ -147,33 +147,20 @@ async def upload_material(
                 if not os.path.exists(file_path):
                     raise FileNotFoundError(f"File not found at path: {file_path}")
                     
-                # Handle both PDF and image files
+                # Handle both PDF and image files - Direct processing to markdown
                 if is_pdf:
-                    raw_text, processed_json, actual_count = await process_pdf_via_gemini(file_path)
+                    raw_text, markdown_content, actual_count = await process_pdf_via_gemini(file_path)
                 else:
                     # Process as a single image if not a PDF
                     logger.info(f"Processing as image: {file_path}")
-                    raw_text, processed_json = await process_image_via_gemini(file_path)
+                    raw_text, markdown_content = await process_image_via_gemini(file_path)
                     actual_count = 1
                 
-                logger.info(f"Processing complete for {material_id}, serializing results")
+                logger.info(f"Direct markdown processing complete for {material_id}")
                 
-                # Ensure processed_json is not None
-                if processed_json is None:
-                    processed_json = {"pages": [{"summary": "", "topics": [], "equations": []}]}
-                
-                
-                # Ensure processed_json is properly serialized
-                if not isinstance(processed_json, str):
-
-                    try:
-                        processed_json_data = processed_json
-                    except Exception as e:
-                        logger.error(f"JSON serialization error: {str(e)}")
-                        # Create a safe fallback
-                        processed_json_data = json.dumps({"pages": [{"summary": f"Error: {str(e)}", "topics": [], "equations": []}]})
-                else:
-                    processed_json_data = processed_json
+                # Ensure markdown_content is not None
+                if markdown_content is None:
+                    markdown_content = f"# Processing Failed\n\nNo content could be extracted from the material."
 
                 logger.info(f"Updating database for material {material_id}")
                 
@@ -183,8 +170,8 @@ async def upload_material(
                         update(StudyMaterialModel)
                         .where(StudyMaterialModel.id == material_id)
                         .values(
-                            content=raw_text,
-                            processed_content=processed_json_data,
+                            content="",  # No longer storing raw text since we do direct processing
+                            processed_content=markdown_content,  # Direct markdown from document
                             page_count=actual_count,
                             status=MaterialStatus.completed
                         )
@@ -195,17 +182,15 @@ async def upload_material(
                     
             except Exception as e:
                 logger.exception(f"Processing failed for material {material_id}: {str(e)}")
+                # Store error as markdown
+                error_markdown = f"# Processing Failed\n\nError: {str(e)}"
                 async with AsyncSessionLocal() as session:
                     await session.execute(
                         update(StudyMaterialModel)
                         .where(StudyMaterialModel.id == material_id)
                         .values(
                             status=MaterialStatus.failed,
-                            # Store error message in processed_content
-                            processed_content=json.dumps({
-                                "error": str(e),
-                                "pages": [{"summary": f"Error: {str(e)}", "topics": [], "equations": []}]
-                            })
+                            processed_content=error_markdown
                         )
                     )
                     await session.commit()
@@ -299,6 +284,7 @@ async def get_material(
             "page_count": mat.page_count,
             "status": mat.status.value,
             "created_at": mat.created_at.isoformat(),
+            "content_type": "markdown"  # Indicate that processed_content is now markdown
         }
         return success_response(msg="Material retrieved", data=data)
     except Exception as e:
