@@ -80,13 +80,6 @@ logs/
 # Windows
 Thumbs.db
 ehthumbs.db
- ```
-
-**Key entries**  
-- **`__pycache__/`, `*.pyc`**: Python cache.  
-- **`venv/`, `.env`**: Don’t commit your virtualenv or secrets.  
-- **`alembic/versions`**: keep—so your migration history is tracked.  
-- **`.vscode/`, `.idea/`**: local editor settings.  
-- **`*.db`**: SQLite files (if you ever use SQLite for quick tests).  
-
-Feel free to adjust (e.g. add `*.log` or other temp files) as your project grows.
+ 
+### Project docs
+docs/
