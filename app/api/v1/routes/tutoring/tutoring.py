@@ -58,7 +58,7 @@ async def ask_question(
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Ask a question to the AI tutor with optional study material context"""
+    """Ask a question to the AI tutor with markdown response"""
     # 1. Ensure subscription is current
     sub = await renew_subscription_for_user(current_user, db)
     if sub.status != SubscriptionStatus.active:

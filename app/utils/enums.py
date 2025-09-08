@@ -13,6 +13,7 @@ class TransactionStatus(str, enum.Enum):
 
 
 class MaterialStatus(str, enum.Enum):
+    idle = "idle"
     processing = "processing"
     completed  = "completed"
     failed     = "failed"

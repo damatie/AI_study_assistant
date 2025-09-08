@@ -7,6 +7,7 @@ from app.api.v1.routes.open.ipinfo import router as ipinfo_router
 from app.api.v1.routes.materials.materials import router as materials_router
 from app.api.v1.routes.assessments.assessments import router as assessments_router
 from app.api.v1.routes.tutoring.tutoring import router as tutoring_router
+from app.api.v1.routes.debug.debug import router as debug_router
 
 router = APIRouter()
 
@@ -30,3 +31,6 @@ router.include_router(tutoring_router)
 
 # Get ipinfo routes
 router.include_router(ipinfo_router)
+
+# Debug routes (development)
+router.include_router(debug_router)

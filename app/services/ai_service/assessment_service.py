@@ -36,14 +36,39 @@ async def generate_assessment_questions(
 
     Critical = f"""
 
-        CRITICAL GUIDELINES
-            - For any mathematical expression, formula, equation, matrix, or symbol convert them to LaTeX format:
-                * Wrap it using display-math delimiters $$ ... $$
-                * Escape every backslash (\\) and replace it with double (\\\\)
-                * Example:(eg. $$C_6H_{{12}}O_6$$  +  $$6O_2$$  -->  $$6CO_2$$  +  $$6H_2O$$  + ATP), (convert them to LaTeX format,Escape every backslash (\\) and replace it with double (\\\\),Example: Convert $$\\frac{{x}}{{y}}$$ to $$\\\\frac{{x}}{{y}}$$)
-                * This should be appilcable to all questions, options, answers, explantions, feedbacks etc...
-                * For multiple choice questions dont use options eg A, B, C, D as the  correct answers alone for clarity
-                
+        **MATHEMATICAL NOTATION REQUIREMENTS (CRITICAL):**
+        
+        When including ANY mathematical content in questions, options, answers, explanations, or feedback, you MUST use proper LaTeX formatting within double dollar signs ($$...$$):
+        
+        **Fractions:** Always use \\\\frac{{numerator}}{{denominator}}
+        - Instead of: x/12 → Use: $$\\\\frac{{x}}{{12}}$$
+        - Instead of: 2x/15 → Use: $$\\\\frac{{2x}}{{15}}$$
+        - Instead of: (x+1)/2x → Use: $$\\\\frac{{x+1}}{{2x}}$$
+        
+        **Variables and Expressions:**
+        - Single variables: $$x$$, $$y$$, $$a$$, $$b$$
+        - Expressions: $$2x + 3$$, $$x^2 - 4$$
+        - Equations: $$x = \\\\frac{{-b \\\\pm \\\\sqrt{{b^2 - 4ac}}}}{{2a}}$$
+        
+        **Common Mathematical Elements:**
+        - Exponents: $$x^2$$, $$e^{{-x}}$$, $$2^n$$
+        - Square roots: $$\\\\sqrt{{x}}$$, $$\\\\sqrt{{x^2 + y^2}}$$
+        - Subscripts: $$x_1$$, $$a_n$$, $$v_0$$
+        - Greek letters: $$\\\\alpha$$, $$\\\\beta$$, $$\\\\pi$$, $$\\\\theta$$
+        - Summation: $$\\\\sum_{{i=1}}^{{n}} x_i$$
+        - Integration: $$\\\\int_0^1 f(x) dx$$
+        - Limits: $$\\\\lim_{{x \\\\to 0}} \\\\frac{{\\\\sin x}}{{x}}$$
+        
+        **Complex Expressions:**
+        - Matrices: $$\\\\begin{{pmatrix}} a & b \\\\\\\\\\\\ c & d \\\\end{{pmatrix}}$$
+        - Systems: $$\\\\begin{{cases}} x + y = 5 \\\\\\\\\\\\ 2x - y = 1 \\\\end{{cases}}$$
+        - Chemical equations: $$C_{{6}}H_{{12}}O_{{6}} + 6O_{{2}} \\\\longrightarrow 6CO_{{2}} + 6H_{{2}}O + ATP$$
+        
+        **ADDITIONAL GUIDELINES:**
+        - **NEVER use plain text for mathematical expressions.** Every mathematical element must be properly formatted in LaTeX.
+        - For multiple choice questions, don't use options like A, B, C, D as the correct answers alone for clarity
+        - Apply LaTeX formatting to ALL mathematical content in questions, options, answers, explanations, and feedback
+        
                 """
 
     prompts = {

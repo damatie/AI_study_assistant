@@ -1,8 +1,7 @@
 # app/core/genai_client.py
 import asyncio
 import logging
-import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Union
 import google.generativeai as genai
 from google.api_core import exceptions as google_exceptions
 from app.core.config import settings
@@ -10,11 +9,26 @@ from app.core.config import settings
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Configure the API
+# Initialize Gemini API
 genai.configure(api_key=settings.GOOGLE_API_KEY)
 
 class GeminiClientWithRetry:
-    """Enhanced Gemini client with retry logic and error handling"""
+    """Enhanced Gemini client with retry logic and error handling."""
+    
+    # Default configurations
+    DEFAULT_GENERATION_CONFIG = {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "top_k": 40,
+        "max_output_tokens": 8192,
+    }
+    
+    DEFAULT_SAFETY_SETTINGS = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    ]
     
     def __init__(self, model_name: str = "gemini-2.5-flash"):
         self.model_name = model_name
@@ -25,15 +39,15 @@ class GeminiClientWithRetry:
         
     async def generate_content_async(
         self, 
-        prompt: str, 
+        prompt: Union[str, List[Dict[str, Any]]], 
         generation_config: Optional[Dict[str, Any]] = None,
-        safety_settings: Optional[Dict[str, Any]] = None
+        safety_settings: Optional[List[Dict[str, Any]]] = None
     ) -> Any:
         """
-        Generate content with retry logic and comprehensive error handling
+        Generate content with retry logic and comprehensive error handling.
         
         Args:
-            prompt: The input prompt
+            prompt: The input prompt (string) or multimodal content (list)
             generation_config: Optional generation configuration
             safety_settings: Optional safety settings
             
@@ -43,25 +57,11 @@ class GeminiClientWithRetry:
         Raises:
             Exception: If all retries are exhausted
         """
+        # Use defaults if not provided
+        generation_config = generation_config or self.DEFAULT_GENERATION_CONFIG.copy()
+        safety_settings = safety_settings or self.DEFAULT_SAFETY_SETTINGS.copy()
+        
         last_exception = None
-        
-        # Default generation config for better reliability
-        if generation_config is None:
-            generation_config = {
-                "temperature": 0.7,
-                "top_p": 0.8,
-                "top_k": 40,
-                "max_output_tokens": 8192,
-            }
-        
-        # Default safety settings
-        if safety_settings is None:
-            safety_settings = [
-                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-            ]
         
         for attempt in range(self.max_retries + 1):
             try:
@@ -74,79 +74,32 @@ class GeminiClientWithRetry:
                     safety_settings=safety_settings
                 )
                 
-                # Check if response is valid
-                if not response or not hasattr(response, 'text'):
-                    raise ValueError("Invalid response from Gemini API")
-                
-                if not response.text or response.text.strip() == "":
-                    raise ValueError("Empty response from Gemini API")
+                # Validate response
+                self._validate_response(response)
                 
                 logger.info("Gemini API call successful")
                 return response
                 
-            except google_exceptions.InternalServerError as e:
+            except (google_exceptions.InternalServerError, 
+                    google_exceptions.ResourceExhausted,
+                    google_exceptions.DeadlineExceeded,
+                    google_exceptions.ServiceUnavailable) as e:
                 last_exception = e
-                logger.warning(f"Gemini API InternalServerError (attempt {attempt + 1}): {str(e)}")
                 
                 if attempt < self.max_retries:
-                    delay = min(self.base_delay * (2 ** attempt), self.max_delay)
+                    delay = self._calculate_delay(e, attempt)
+                    logger.warning(f"Gemini API {type(e).__name__} (attempt {attempt + 1}): {str(e)}")
                     logger.info(f"Retrying in {delay} seconds...")
                     await asyncio.sleep(delay)
                     continue
                 else:
-                    logger.error("All retry attempts exhausted for InternalServerError")
+                    logger.error(f"All retry attempts exhausted for {type(e).__name__}")
                     break
                     
-            except google_exceptions.ResourceExhausted as e:
+            except (google_exceptions.InvalidArgument, google_exceptions.PermissionDenied) as e:
+                # Don't retry for these errors
                 last_exception = e
-                logger.warning(f"Gemini API quota exhausted (attempt {attempt + 1}): {str(e)}")
-                
-                if attempt < self.max_retries:
-                    # Longer delay for quota issues
-                    delay = min(self.base_delay * (3 ** attempt), self.max_delay)
-                    logger.info(f"Quota exhausted, waiting {delay} seconds before retry...")
-                    await asyncio.sleep(delay)
-                    continue
-                else:
-                    logger.error("All retry attempts exhausted for ResourceExhausted")
-                    break
-                    
-            except google_exceptions.DeadlineExceeded as e:
-                last_exception = e
-                logger.warning(f"Gemini API timeout (attempt {attempt + 1}): {str(e)}")
-                
-                if attempt < self.max_retries:
-                    delay = min(self.base_delay * (2 ** attempt), self.max_delay)
-                    logger.info(f"Request timed out, retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
-                    continue
-                else:
-                    logger.error("All retry attempts exhausted for DeadlineExceeded")
-                    break
-                    
-            except google_exceptions.ServiceUnavailable as e:
-                last_exception = e
-                logger.warning(f"Gemini API service unavailable (attempt {attempt + 1}): {str(e)}")
-                
-                if attempt < self.max_retries:
-                    delay = min(self.base_delay * (2 ** attempt), self.max_delay)
-                    logger.info(f"Service unavailable, retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
-                    continue
-                else:
-                    logger.error("All retry attempts exhausted for ServiceUnavailable")
-                    break
-                    
-            except google_exceptions.InvalidArgument as e:
-                # Don't retry for invalid arguments
-                last_exception = e
-                logger.error(f"Gemini API invalid argument: {str(e)}")
-                break
-                
-            except google_exceptions.PermissionDenied as e:
-                # Don't retry for permission issues
-                last_exception = e
-                logger.error(f"Gemini API permission denied: {str(e)}")
+                logger.error(f"Gemini API {type(e).__name__}: {str(e)}")
                 break
                 
             except Exception as e:
@@ -163,10 +116,31 @@ class GeminiClientWithRetry:
                     break
         
         # If we get here, all retries failed
+        self._raise_user_friendly_error(last_exception)
+    
+    def _validate_response(self, response: Any) -> None:
+        """Validate the API response."""
+        if not response or not hasattr(response, 'text'):
+            raise ValueError("Invalid response from Gemini API")
+        
+        if not response.text or response.text.strip() == "":
+            raise ValueError("Empty response from Gemini API")
+    
+    def _calculate_delay(self, exception: Exception, attempt: int) -> float:
+        """Calculate retry delay based on exception type and attempt number."""
+        if isinstance(exception, google_exceptions.ResourceExhausted):
+            # Longer delay for quota issues
+            return min(self.base_delay * (3 ** attempt), self.max_delay)
+        else:
+            # Standard exponential backoff
+            return min(self.base_delay * (2 ** attempt), self.max_delay)
+    
+    def _raise_user_friendly_error(self, last_exception: Exception) -> None:
+        """Raise a user-friendly error message based on the exception type."""
         error_msg = f"Gemini API failed after {self.max_retries + 1} attempts. Last error: {str(last_exception)}"
         logger.error(error_msg)
         
-        # Provide user-friendly error messages based on the type of error
+        # Provide user-friendly error messages
         if isinstance(last_exception, google_exceptions.ResourceExhausted):
             raise Exception("AI service is currently experiencing high demand. Please try again in a few minutes.")
         elif isinstance(last_exception, google_exceptions.InternalServerError):
@@ -178,14 +152,19 @@ class GeminiClientWithRetry:
         else:
             raise Exception("AI service is temporarily unavailable. Please try again later.")
 
-# Create a global instance
-_gemini_client = GeminiClientWithRetry()
 
-def get_gemini_model():
-    """Get the enhanced Gemini client instance"""
+# Global client instance
+_gemini_client: Optional[GeminiClientWithRetry] = None
+
+
+def get_gemini_model() -> GeminiClientWithRetry:
+    """Get the enhanced Gemini client instance (singleton pattern)."""
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = GeminiClientWithRetry()
     return _gemini_client
 
-# Backward compatibility function
-def get_gemini_model_legacy():
-    """Legacy function that returns the basic model (for backward compatibility)"""
+
+def get_gemini_model_legacy() -> genai.GenerativeModel:
+    """Legacy function that returns the basic model (for backward compatibility)."""
     return genai.GenerativeModel("gemini-2.0-flash-exp")
