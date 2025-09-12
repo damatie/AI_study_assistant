@@ -31,6 +31,9 @@ class StorageBackend(Protocol):
         ...
     def public_url(self, *, key: str) -> Optional[str]:
         ...
+    async def get_bytes(self, *, key: str) -> bytes:
+        """Retrieve raw bytes for a previously stored object key."""
+        ...
 
 @dataclass
 class LocalStorageBackend:
@@ -50,6 +53,11 @@ class LocalStorageBackend:
 
     def public_url(self, *, key: str) -> Optional[str]:
         return None  # Local storage not exposed publicly
+
+    async def get_bytes(self, *, key: str) -> bytes:
+        path = os.path.join(self.base_path, key)
+        with open(path, 'rb') as f:
+            return f.read()
 
 @dataclass
 class S3StorageBackend:
@@ -105,6 +113,15 @@ class S3StorageBackend:
         if settings.S3_PUBLIC_BASE_URL:
             return f"{settings.S3_PUBLIC_BASE_URL.rstrip('/')}/{key}"
         return None
+
+    async def get_bytes(self, *, key: str) -> bytes:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._get_object_bytes_sync, key)
+
+    def _get_object_bytes_sync(self, key: str) -> bytes:
+        obj = self.client.get_object(Bucket=self.bucket, Key=key)
+        return obj['Body'].read()
 
 _backend: StorageBackend | None = None
 

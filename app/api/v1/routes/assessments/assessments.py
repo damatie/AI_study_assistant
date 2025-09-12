@@ -151,16 +151,21 @@ async def generate_assessment(
         )
 
     # 7. Build content (optional topic filter)
-    # Since we now do direct processing, use the markdown content for assessment generation
-    content = mat.processed_content or ""  # Use markdown content directly
-    
-    if assessment_data.topic and mat.processed_content:
-        # Import markdown parser for topic extraction
-        from app.services.material_processing_service.markdown_parser import extract_topic_from_markdown
-        
+    # Prefer processed markdown envelope (detailed → overview), falling back to raw content
+    from app.utils.processed_payload import get_detailed, get_overview
+    base_md = get_detailed(mat.processed_content) or get_overview(mat.processed_content) or (mat.content or "")
+
+    # Clean for AI consumption
+    from app.services.material_processing_service.markdown_parser import (
+        extract_topic_from_markdown,
+        clean_markdown_for_context,
+    )
+    content = clean_markdown_for_context(base_md)
+
+    if assessment_data.topic and content:
         # Extract specific topic content from markdown
-        topic_content = extract_topic_from_markdown(mat.processed_content, assessment_data.topic)
-        if topic_content != mat.processed_content:  # Topic was found
+        topic_content = extract_topic_from_markdown(content, assessment_data.topic)
+        if topic_content and topic_content != content:  # Topic was found
             content = topic_content
 
     # 8. LLM generate each type

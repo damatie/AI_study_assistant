@@ -8,7 +8,10 @@ from app.core.config import settings
 
 def setup_logging() -> None:
     """Setup centralized logging configuration"""
-    
+    # Prevent logging handler failures (e.g., broken pipe) from raising exceptions
+    # that could interrupt request/background task processing on Windows.
+    logging.raiseExceptions = False
+
     # Define log format
     log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     

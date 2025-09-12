@@ -20,6 +20,27 @@ def get_pdf_page_count_from_bytes(pdf_bytes: bytes) -> int:
         raise ValueError("Could not read PDF page count from bytes")
 
 
+def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
+    """Best-effort text extraction from PDF bytes using PyPDF2.
+
+    Returns a string (may be empty) with pages joined by two newlines.
+    """
+    try:
+        reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+        texts = []
+        for page in reader.pages:
+            try:
+                t = page.extract_text() or ""
+                texts.append(t.strip())
+            except Exception:
+                # continue on extract failures per-page
+                continue
+        return "\n\n".join([t for t in texts if t])
+    except Exception:
+        logger.exception("Failed to extract text from PDF bytes")
+        return ""
+
+
 
 def _generate_educational_markdown_prompt(page_count: int | None = None) -> str:
     """
@@ -195,13 +216,14 @@ Return ONLY the final markdown study guide with any embedded stepsjson blocks.
 """
 
 # Function to handle non-PDF image files
-async def process_image_via_gemini(image_path: str) -> Tuple[str, str]:
+async def process_image_via_gemini(image_path: str, mode: str = "overview") -> Tuple[str, str]:
     """
     Process a single image file directly to markdown through Gemini API.
-    
+
     Args:
         image_path: Path to the image file
-        
+        mode: "overview" for concise overview, "detailed" for full study guide
+
     Returns:
         raw_text: Empty string (no longer extracted separately)
         markdown_content: Direct markdown analysis of the image content
@@ -210,27 +232,39 @@ async def process_image_via_gemini(image_path: str) -> Tuple[str, str]:
         # Read image file
         with open(image_path, "rb") as f:
             image_bytes = f.read()
-        
+
         # Generate markdown directly from image (single step)
         model = get_gemini_model()
-        markdown_prompt = _generate_educational_markdown_prompt()
-        markdown_response = await model.generate_content_async([
-            markdown_prompt,
-            {"mime_type": "image/jpeg", "data": image_bytes}
-        ], generation_config={
-            "temperature": 0.65,
-            "top_p": 0.85,
-            "top_k": 40,
-            "max_output_tokens": 16384,
-        })
+        # Pick prompt based on mode
+        if (mode or "overview").lower() == "overview":
+            markdown_prompt = (
+                "Create a concise overview of this image content. Focus on main topics, key concepts, and any obvious formulas in (LaTeX in $$...$$). Keep it brief, well-structured, and student-friendly. "
+            )
+        else:
+            markdown_prompt = _generate_educational_markdown_prompt()
+        markdown_response = await model.generate_content_async(
+            [
+                markdown_prompt,
+                {"mime_type": "image/jpeg", "data": image_bytes},
+            ],
+            generation_config={
+                "temperature": 0.65,
+                "top_p": 0.85,
+                "top_k": 40,
+                "max_output_tokens": 16384,
+            },
+        )
 
         markdown_content = sanitize_all_blocks(markdown_response.text)
         markdown_content = filter_trivial_blocks(markdown_content)
-        print(f"Generated markdown length: {len(markdown_content)} characters")
+        # Use logger instead of print to avoid Windows pipe issues in background tasks
+        logger.info(
+            f"Generated markdown length: {len(markdown_content)} characters"
+        )
 
         # Return empty string for raw_text since we're doing direct processing
         return "", markdown_content
-        
+
     except Exception as e:
         logger.exception(f"Failed to process image via Gemini: {str(e)}")
         # Return empty results in case of failure
@@ -238,13 +272,14 @@ async def process_image_via_gemini(image_path: str) -> Tuple[str, str]:
 
 
 # Function to handle PDF files
-async def process_pdf_via_gemini(pdf_path: str) -> Tuple[str, str, int]:
+async def process_pdf_via_gemini(pdf_path: str, mode: str = "overview") -> Tuple[str, str, int]:
     """
     Process a PDF file directly to markdown through Gemini API.
-    
+
     Args:
         pdf_path: Path to the PDF file
-        
+        mode: "overview" for concise overview, "detailed" for full study guide
+
     Returns:
         raw_text: Empty string (no longer extracted separately)
         markdown_content: Direct markdown analysis of the PDF content
@@ -254,32 +289,84 @@ async def process_pdf_via_gemini(pdf_path: str) -> Tuple[str, str, int]:
         # Read PDF file as bytes
         with open(pdf_path, "rb") as f:
             pdf_bytes = f.read()
-        
+
         # Get page count from bytes (more efficient - single read)
         page_count = get_pdf_page_count_from_bytes(pdf_bytes)
-        
-        print(f"Processing PDF with {page_count} pages directly to markdown via Gemini...")
-        
+
+        # Use logger instead of print to avoid Windows pipe issues in background tasks
+        logger.info(
+            f"Processing PDF with {page_count} pages directly to markdown via Gemini..."
+        )
+
         # Generate markdown directly from PDF (single step)
         model = get_gemini_model()
-        markdown_prompt = _generate_educational_markdown_prompt(page_count)
-        markdown_response = await model.generate_content_async([
-            markdown_prompt,
-            {"mime_type": "application/pdf", "data": pdf_bytes}
-        ], generation_config={
-            "temperature": 0.65,
-            "top_p": 0.85,
-            "top_k": 40,
-            "max_output_tokens": 16384,
-        })
+        # Pick prompt based on mode
+        if (mode or "overview").lower() == "overview":
+            markdown_prompt = (
+                f"Source material: ~{page_count} pages.\n"
+                "Create a concise overview of this PDF. Focus on main topics, key concepts, important formulas (LaTeX in $$...$$), and high-yield insights. Keep it brief and well-structured (≤ 2000 words)."
+            )
+        else:
+            markdown_prompt = _generate_educational_markdown_prompt(page_count)
+        try:
+            markdown_response = await model.generate_content_async(
+                [
+                    markdown_prompt,
+                    {"mime_type": "application/pdf", "data": pdf_bytes},
+                ],
+                generation_config={
+                    "temperature": 0.65,
+                    "top_p": 0.85,
+                    "top_k": 40,
+                    "max_output_tokens": 16384,
+                },
+            )
 
-        markdown_content = sanitize_all_blocks(markdown_response.text)
-        markdown_content = filter_trivial_blocks(markdown_content)
-        print(f"Generated markdown length: {len(markdown_content)} characters")
+            markdown_content = sanitize_all_blocks(markdown_response.text)
+            markdown_content = filter_trivial_blocks(markdown_content)
+            # Use logger instead of print to avoid Windows pipe issues in background tasks
+            logger.info(
+                f"Generated markdown length: {len(markdown_content)} characters"
+            )
 
-        # Return empty string for raw_text since we're doing direct processing
-        return "", markdown_content, page_count
-        
+            # Return empty string for raw_text since we're doing direct processing
+            return "", markdown_content, page_count
+        except Exception as primary_error:
+            # Windows pipe or multimodal upload path failed: fallback to text-only summarization
+            logger.warning(
+                f"PDF multimodal path failed ({primary_error}). Falling back to text-only summarization."
+            )
+            text = _extract_text_from_pdf_bytes(pdf_bytes)
+            if not text:
+                raise
+            # Trim very large texts to keep token usage bounded
+            if len(text) > 200_000:
+                text = text[:200_000]
+            # Choose matching fallback prompt
+            if (mode or "overview").lower() == "overview":
+                base_prompt = (
+                    f"Source material: ~{page_count} pages.\n"
+                    "Create a concise overview of this document from the extracted text below. Focus on main topics, key concepts, and high-yield formulas (LaTeX in $$...$$). Keep it brief."
+                )
+            else:
+                base_prompt = _generate_educational_markdown_prompt(page_count)
+            fallback_prompt = base_prompt + "\n\n[BEGIN EXTRACTED TEXT]\n" + text + "\n[END EXTRACTED TEXT]"
+            markdown_response = await model.generate_content_async(
+                fallback_prompt,
+                generation_config={
+                    "temperature": 0.6,
+                    "top_p": 0.85,
+                    "top_k": 40,
+                    "max_output_tokens": 16384,
+                },
+            )
+            markdown_content = sanitize_all_blocks(markdown_response.text)
+            markdown_content = filter_trivial_blocks(markdown_content)
+            logger.info(
+                f"Generated markdown (fallback) length: {len(markdown_content)} characters"
+            )
+            return "", markdown_content, page_count
+
     except Exception as e:
         logger.exception(f"Failed to process PDF directly via Gemini: {str(e)}")
         # Return empty results in case of failure

@@ -2,6 +2,7 @@
 
 import re
 import logging
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -43,17 +44,29 @@ def extract_topic_from_markdown(markdown_content: str, topic_name: str) -> str:
         return markdown_content
 
 
-def clean_markdown_for_context(markdown_content: str) -> str:
+def clean_markdown_for_context(markdown_content: Any) -> str:
     """
     Clean markdown content for use as context in AI services
     
     Args:
-        markdown_content: The full markdown content
+        markdown_content: The full markdown content; can be a string or an
+            envelope-like dict containing 'overview'/'detailed'
         
     Returns:
         Cleaned content suitable for AI context
     """
     try:
+        # Normalize input into a markdown string first
+        if isinstance(markdown_content, dict):
+            # Attempt to extract from our envelope shape
+            md = markdown_content.get("detailed") or markdown_content.get("overview")
+            markdown_content = md if isinstance(md, str) else ""
+        elif markdown_content is None:
+            markdown_content = ""
+        elif not isinstance(markdown_content, str):
+            # Fallback: stringify unknown types
+            markdown_content = str(markdown_content)
+
         # Remove HTML comments
         content = re.sub(r'<!--.*?-->', '', markdown_content, flags=re.DOTALL)
         
