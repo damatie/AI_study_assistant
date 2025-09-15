@@ -269,39 +269,48 @@ def _derive_hint_and_questions(markdown: str, title: str) -> Tuple[str, List[str
     has_steps = "```stepsjson" in text
 
     suggestions: List[str] = []
-    # Use a neutral base phrase instead of the actual title
     base = "this material"
 
+    # Prioritize question styles aligned with study flow
     if topics:
         suggestions.append(f"How does the '{topics[0]}' section relate to the main goal of {base}?")
-    if focus_terms:
-        suggestions.append(f"Why is {focus_terms[0]} important in {base}?")
-    if len(topics) >= 2:
-        suggestions.append(f"Compare and contrast '{topics[0]}' vs '{topics[1]}' in {base}.")
-    if has_steps:
-        suggestions.append("Walk me through the key process described (step by step). What are the inputs and outputs?")
+
+    # If preprocessing or feature terms appear, suggest targeted questions
+    def contains_any(words: list[str]) -> bool:
+        s = text.lower()
+        return any(w in s for w in words)
+
+    if contains_any(["pre-process", "preprocess", "pre-processing", "preprocessing", "normalization", "stemming", "lemmatiz", "html", "tag removal", "stopword"]):
+        suggestions.append("Describe the purpose of the main preprocessing steps and how they affect the results.")
+
+    if contains_any(["tf-idf", "tfidf", "term frequency", "inverse document frequency"]):
+        suggestions.append("Explain how TF‑IDF helps in feature extraction and when it works best.")
+
+    if contains_any(["feature", "manual feature", "n-gram", "ngram", "regex", "url", "domain", "header"]):
+        suggestions.append("Name three specific features used and briefly explain why each is indicative of the target outcome.")
+
+    if contains_any(["random forest", "logistic regression", "svm", "xgboost", "neural", "transformer", "bert", "distilbert"]):
+        suggestions.append("What is the role of the primary model described, and what is its key strength in this context?")
+
     if has_math:
         suggestions.append("Explain the key equation or derivation and when it applies.")
 
-    # Fill up to at least 3 using templates with remaining focus terms
-    templates = [
-        "Give a practical example applying {term}.",
-        "What are the limitations or pitfalls of {term}, and how can they be mitigated?",
-        "How would you implement {term} in code, at a high level?",
-    ]
-    ti = 0
-    for term in focus_terms[1:]:
-        if len(suggestions) >= 5:
-            break
-        suggestions.append(templates[ti % len(templates)].format(term=term))
-        ti += 1
+    # Metrics and validation patterns
+    if contains_any(["accuracy", "precision", "recall", "f1", "auc", "roc"]):
+        suggestions.append("Define Accuracy, Precision, and Recall in the context of this material.")
+    if contains_any(["cross-validation", "k-fold", "fold", "train-test", "validation"]):
+        suggestions.append("Why is k‑fold cross‑validation considered more robust than a single train‑test split?")
 
-    # Ensure exactly 4 suggestions (fill with targeted fallbacks if needed)
+    # Trim duplicates and empties, preserve order
+    seenq = set()
+    suggestions = [q for q in suggestions if q and not (q in seenq or seenq.add(q))]
+
+    # Ensure exactly 4 suggestions with focused fallbacks
     fallbacks = [
-        "Which key concepts are central in this material?",
-        "How would you apply the main method in this material to a simple example?",
-        "What assumptions underlie the approach in this material, and when do they break?",
-        "Summarize the practical steps to implement the core idea from this material.",
+        "What is the primary goal addressed, and what sensitive inputs/outputs are involved?",
+        "List reasons why this problem matters in practice.",
+        "What are the main limitations of traditional approaches mentioned here?",
+        "Summarize the practical steps in the core method described.",
     ]
     fi = 0
     while len(suggestions) < 4 and fi < len(fallbacks):

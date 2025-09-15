@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 FENCE_RE = re.compile(r"```stepsjson\s*\n(?P<json>{[\s\S]*?})\s*```", re.IGNORECASE)
 ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,5}$")  # allow a bit longer (up to 6 chars) to reduce filtering
 
+# Generic fenced code blocks (not stepsjson)
+GENERIC_FENCE_RE = re.compile(r"```(?P<lang>[A-Za-z0-9_+-]*)\s*\n(?P<body>[\s\S]*?)\n```", re.MULTILINE)
+
 def extract_stepsjson(markdown: str) -> Tuple[Dict[str, Any] | None, str | None]:
     """Return (parsed_obj, raw_json_str) for the FIRST stepsjson fence. If none, (None, None)."""
     m = FENCE_RE.search(markdown)
@@ -232,9 +235,126 @@ def filter_trivial_blocks(markdown: str) -> str:
 
     return FENCE_RE.sub(_repl, markdown)
 
+
+def _looks_like_code(text: str) -> bool:
+    """Heuristically determine if a fenced block body is actual code.
+
+    We treat as code if we see common programming tokens, braces, assignments,
+    imports, function/class definitions, or JSON/XML structures.
+    """
+    t = text.strip()
+    if not t:
+        return False
+    # Fast signals for code-like blocks
+    code_signals = [
+        r"\bclass\b", r"\bdef\b", r"\bfunction\b", r"\bvar\b", r"\blet\b", r"\bconst\b",
+        r"#include\b", r"using\s+namespace", r"=>", r"::", r"->", r"==", r"!=", r"<=", r">=",
+        r"\breturn\b", r"\bif\s*\(", r"\bfor\s*\(", r"\bwhile\s*\(", r"try:\s*$", r"catch\b",
+        r"<[^>]+>",  # XML/HTML tags
+    ]
+    if any(re.search(p, t) for p in code_signals):
+        return True
+    # JSON-like or dict-like
+    if (t.startswith("{") and t.endswith("}")) or (t.startswith("[") and t.endswith("]")):
+        return True
+    # Many braces/semicolons are typical of code
+    if t.count(";") >= 2 or t.count("{") + t.count("}") >= 2:
+        return True
+    return False
+
+
+def unwrap_non_code_fences(markdown: str) -> str:
+    """Convert fenced blocks that are plain text/URLs into normal paragraphs.
+
+    Rules:
+    - Ignore ```stepsjson fences (handled elsewhere).
+    - If lang is empty or a prose-ish marker (text, txt, md, markdown), and body doesn't look like code,
+      unwrap the fence.
+    - If the body is a single bare URL, convert to an inline link [URL](URL).
+    """
+
+    def _repl(match: re.Match) -> str:
+        lang = (match.group("lang") or "").strip().lower()
+        body = (match.group("body") or "").strip("\n")
+        if lang == "stepsjson":  # safety; our other regex shouldn't catch this
+            return match.group(0)
+        if lang in {"", "text", "txt", "md", "markdown"} and not _looks_like_code(body):
+            # Single URL line -> inline link
+            url_match = re.fullmatch(r"https?://\S+", body.strip())
+            if url_match:
+                url = url_match.group(0)
+                return f"[{url}]({url})"
+            # Otherwise, just unwrap as plain text (preserve internal newlines)
+            return body
+        return match.group(0)
+
+    # Apply only to non-steps fences by first replacing generic fences; stepsjson uses a different pattern
+    return GENERIC_FENCE_RE.sub(_repl, markdown)
+
+
+_ARTIFACT_HEADER_RE = re.compile(
+    r"^\s*\|?\s*source\s*\|\s*definition\s*#?\s*\|?\s*$",
+    re.IGNORECASE,
+)
+_SNAKE_TITLE_RE = re.compile(r"^[A-Za-z0-9]+(?:_[A-Za-z0-9]+){5,}\s*$")
+
+
+def strip_scanned_table_artifacts(markdown: str) -> str:
+    """Remove ugly scan artifacts like a table header line "| Source | Definition #"
+    and an immediate long snake_case title row.
+
+    Safety rules:
+    - Never alter content inside fenced code blocks (including stepsjson).
+    - Only strip exact header pattern variants and, if present, the very next line
+      when it is a long snake_case title (≥6 underscore-delimited tokens).
+    - Do not remove regular prose or headings.
+    """
+    lines = markdown.splitlines()
+
+    out: List[str] = []
+    i = 0
+    in_fence = False
+    current_fence_lang = None
+
+    while i < len(lines):
+        line = lines[i]
+        fence_open = re.match(r"^```\s*([A-Za-z0-9_+-]*)\s*$", line)
+        if fence_open:
+            lang = (fence_open.group(1) or "").strip().lower()
+            if not in_fence:
+                in_fence = True
+                current_fence_lang = lang
+            else:
+                # closing fence
+                in_fence = False
+                current_fence_lang = None
+            out.append(line)
+            i += 1
+            continue
+
+        if not in_fence:
+            if _ARTIFACT_HEADER_RE.match(line):
+                # Skip header line
+                i += 1
+                # Optionally skip immediate snake_case long title line(s)
+                if i < len(lines) and _SNAKE_TITLE_RE.match(lines[i]):
+                    i += 1
+                # Also skip an empty spacer line just after
+                if i < len(lines) and not lines[i].strip():
+                    i += 1
+                continue
+
+        # default: keep line
+        out.append(line)
+        i += 1
+
+    return "\n".join(out)
+
 __all__ = [
     "extract_stepsjson",
     "validate_or_build",
     "sanitize_all_blocks",
     "filter_trivial_blocks",
+    "unwrap_non_code_fences",
+    "strip_scanned_table_artifacts",
 ]

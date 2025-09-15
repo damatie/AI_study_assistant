@@ -6,7 +6,12 @@ from typing import Tuple, Optional
 import PyPDF2
 
 from app.core.genai_client import get_gemini_model
-from app.utils.stepsjson import sanitize_all_blocks, filter_trivial_blocks
+from app.utils.stepsjson import (
+    sanitize_all_blocks,
+    filter_trivial_blocks,
+    unwrap_non_code_fences,
+    strip_scanned_table_artifacts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -167,21 +172,9 @@ Only include if explicitly present in source:
 - **Solution Process:** Key steps (compressed)
 - **Result:** Final answer with insight
 
-### 5. Learning Reinforcement
-
-**Memory Aids** (if patterns emerge):
-- 3-5 memorable patterns, mnemonics, or frameworks
-- Focus on "why" connections, not rote memorization
-
-**Active Recall Questions** (6-12):
-- Mix of: definitions, applications, "what if" scenarios
-- Every question must be answerable from included content
-- No answer key needed
-
-**High-Yield Summary** (6-10 bullets):
-- Most important takeaways
-- No redundancy with earlier content
-- Maximum insight per bullet
+### 5. Reinforcement (Do Not Include as a separate section)
+- Do NOT include a separate "Learning Reinforcement" or "Active Recall Questions" section in the notes output.
+- If the source itself contains such lists, compress them into the relevant section rather than adding a new section at the end.
 
 ## STYLE GUIDELINES
 
@@ -267,6 +260,8 @@ async def process_image_via_gemini(image_path: str, mode: str = "overview", titl
         )
 
         markdown_content = sanitize_all_blocks(markdown_response.text)
+        markdown_content = unwrap_non_code_fences(markdown_content)
+        markdown_content = strip_scanned_table_artifacts(markdown_content)
         markdown_content = filter_trivial_blocks(markdown_content)
         # Use logger instead of print to avoid Windows pipe issues in background tasks
         logger.info(
@@ -344,6 +339,8 @@ async def process_pdf_via_gemini(pdf_path: str, mode: str = "overview", title: O
             )
 
             markdown_content = sanitize_all_blocks(markdown_response.text)
+            markdown_content = unwrap_non_code_fences(markdown_content)
+            markdown_content = strip_scanned_table_artifacts(markdown_content)
             markdown_content = filter_trivial_blocks(markdown_content)
             # Use logger instead of print to avoid Windows pipe issues in background tasks
             logger.info(
@@ -392,6 +389,8 @@ async def process_pdf_via_gemini(pdf_path: str, mode: str = "overview", title: O
                 },
             )
             markdown_content = sanitize_all_blocks(markdown_response.text)
+            markdown_content = unwrap_non_code_fences(markdown_content)
+            markdown_content = strip_scanned_table_artifacts(markdown_content)
             markdown_content = filter_trivial_blocks(markdown_content)
             logger.info(
                 f"Generated markdown (fallback) length: {len(markdown_content)} characters"
