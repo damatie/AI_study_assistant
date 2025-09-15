@@ -150,6 +150,10 @@ async def get_chat_hint(
 def _derive_hint_and_questions(markdown: str, title: str) -> Tuple[str, List[str]]:
     """Create a concise hint (1–2 sentences) and exactly 4 content‑aware questions.
 
+    Important: Never include the material title in the hint or questions. Use
+    neutral phrases like "this material" or "the document" so suggestions
+    generalize and don't sound repetitive.
+
     Approach (no LLM):
     - Use the first meaningful paragraph as the hint.
     - Extract section headings and key keywords from the document.
@@ -181,13 +185,59 @@ def _derive_hint_and_questions(markdown: str, title: str) -> Tuple[str, List[str
     if sentences:
         hint = " ".join(sentences[:2])
     else:
-        hint = f"Explore core ideas, methods, and results in '{title}'."
+        # Use neutral wording; do not inject the actual title
+        hint = "Explore the core ideas, methods, and results presented in this material."
 
-    # Collect headings (## / ###) in order
+    # Collect headings (## / ###) in order and filter meta/boilerplate
     headings: List[str] = []
+    meta_headings = {
+        "abstract",
+        "introduction",
+        "conclusion",
+        "results",
+        "discussion",
+        "references",
+        "concise overview",
+        "overview",
+        "overview & learning objectives",
+        "learning objectives",
+        "high-yield summary",
+        "summary",
+        "table of contents",
+        "contents",
+        "quality checklist",
+        "examples & applications",
+        "visual elements policy",
+        "interactive process visualization",
+        "stepsjson format specification",
+        "stepsjson rules",
+        "good stepsjson examples",
+        "poor stepsjson examples",
+    }
+
+    # Title tokens to help filter headings repeating the title
+    def norm_tokens(s: str) -> set[str]:
+        return {t for t in re.findall(r"[a-z0-9]+", s.lower()) if len(t) > 2}
+
+    title_tokens = norm_tokens(title or "")
+
     for m in re.finditer(r"^##+\s+(.+)$", text, flags=re.MULTILINE):
         h = m.group(1).strip().strip('#').strip()
-        if h.lower() in {"abstract", "introduction", "conclusion", "results", "discussion", "references"}:
+        # drop leading numbering like "1.", "2.1)" etc.
+        h = re.sub(r"^\s*\d+(?:[.)]|(?:\.\d+)*[.)]?)[\s-]*", "", h)
+        hl = h.lower()
+        if hl in meta_headings:
+            continue
+        # Skip if heading starts with any meta keyword
+        if any(hl.startswith(mh) for mh in meta_headings):
+            continue
+        # Skip if heading is largely the title (>=60% token overlap)
+        htoks = norm_tokens(hl)
+        overlap = len(htoks & title_tokens)
+        if title_tokens and htoks and (overlap / max(1, len(htoks)) >= 0.6):
+            continue
+        # Skip if heading contains 'introduction' even when prefixed with numbers
+        if "introduction" in hl:
             continue
         headings.append(h)
     # Deduplicate while preserving order
@@ -198,6 +248,12 @@ def _derive_hint_and_questions(markdown: str, title: str) -> Tuple[str, List[str
     stop = {
         'the','and','for','that','with','from','this','have','has','are','was','were','will','can','into','using','use','used','their','our','your','its','between','over','under','about','than','then','also','such','may','might','more','most','less','least','each','other','within','without','across','based','on','of','in','to','a','an','by','is','it','as','at','or','be','we','you','they','he','she','them','his','her','which','who','whom'
     }
+    # Add meta words that shouldn't influence question focus
+    stop.update({
+        'concise','overview','learning','objectives','summary','high','yield','highyield',
+        'figure','figures','table','tables','contents','quality','checklist','policy',
+        'process','visualization','stepsjson','examples','applications','example','application'
+    })
     words = re.findall(r"[A-Za-z][A-Za-z\-]{2,}", text.lower())
     keywords = [w for w in words if w not in stop]
     key_counts = Counter(keywords)
@@ -213,14 +269,15 @@ def _derive_hint_and_questions(markdown: str, title: str) -> Tuple[str, List[str
     has_steps = "```stepsjson" in text
 
     suggestions: List[str] = []
-    base = title.strip() or "this material"
+    # Use a neutral base phrase instead of the actual title
+    base = "this material"
 
     if topics:
         suggestions.append(f"How does the '{topics[0]}' section relate to the main goal of {base}?")
     if focus_terms:
         suggestions.append(f"Why is {focus_terms[0]} important in {base}?")
     if len(topics) >= 2:
-        suggestions.append(f"Compare and contrast '{topics[0]}' vs '{topics[1]}' in this material.")
+        suggestions.append(f"Compare and contrast '{topics[0]}' vs '{topics[1]}' in {base}.")
     if has_steps:
         suggestions.append("Walk me through the key process described (step by step). What are the inputs and outputs?")
     if has_math:
@@ -241,10 +298,10 @@ def _derive_hint_and_questions(markdown: str, title: str) -> Tuple[str, List[str
 
     # Ensure exactly 4 suggestions (fill with targeted fallbacks if needed)
     fallbacks = [
-        f"Which key concepts are central in {base}?",
-        f"How would you apply the main method in {base} to a simple example?",
-        f"What assumptions underlie the approach in {base}, and when do they break?",
-        f"Summarize the practical steps to implement the core idea from {base}.",
+        "Which key concepts are central in this material?",
+        "How would you apply the main method in this material to a simple example?",
+        "What assumptions underlie the approach in this material, and when do they break?",
+        "Summarize the practical steps to implement the core idea from this material.",
     ]
     fi = 0
     while len(suggestions) < 4 and fi < len(fallbacks):

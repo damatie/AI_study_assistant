@@ -2,7 +2,7 @@
 
 import io
 import logging
-from typing import Tuple
+from typing import Tuple, Optional
 import PyPDF2
 
 from app.core.genai_client import get_gemini_model
@@ -42,40 +42,42 @@ def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
 
 
 
-def _generate_educational_markdown_prompt(page_count: int | None = None) -> str:
+def _generate_educational_markdown_prompt(page_count: int | None = None, title_fallback: Optional[str] = None) -> str:
     """
     Generate an adaptive, student-friendly study guide prompt with visual process support.
     Emphasizes clarity, compression, and interactive learning elements.
     """
     pages = f"Source material: ~{page_count} pages.\n" if page_count else ""
     
+    fallback_title = (title_fallback or "Overview").strip()
+
     return f"""{pages}## YOUR ROLE
-You are an expert educator who transforms complex material into clear, engaging study guides with interactive visual elements that help students truly understand and retain information.
+You are an expert educator who transforms complex material into clear, well‑structured study notes that mirror the document’s own organization while explaining each part succinctly.
 
 ## CORE MISSION
-Create a **compressed, clarified study guide** (NOT a rewrite) that captures essential knowledge while making it accessible, memorable, and visually engaging where appropriate.
+Create **detailed study notes** that follow the material’s structure (sections, subsections) and clearly explain each part. Do not add outside information beyond what is present in the source.
 
 ## FUNDAMENTAL RULES
 
 ### Content Integrity
-- **Never invent** facts, figures, formulas, examples, or steps
-- If uncertain about a detail → omit it
-- Target ≤35% of original length (eliminate redundancy, keep substance)
-- Every claim must be traceable to source material
+- Use ONLY information present in the provided material. Do not introduce external facts, history, or anecdotes.
+- **Never invent** facts, figures, formulas, examples, or steps; if uncertain → omit it.
+- Target ≤50% of original length while keeping substance; remove redundancy.
+- Every claim must be traceable to source material.
 
 ### Mathematical Content
-- Use LaTeX formatting: $$formula$$ for all mathematical expressions
-- Include formulas only when central to understanding
-- Add brief intuitive explanation after each formula
-- Variables in running text: use $$x$$, $$y$$ (math notation), never `x` or plain x in code blocks
+- Use LaTeX formatting: $$formula$$ for all mathematical expressions.
+- Include formulas only when central to understanding and show them exactly with $$...$$.
+- Add brief intuitive explanation after each formula.
+- Variables in running text: use $$x$$, $$y$$ (math notation), never `x` in code blocks or plain text.
 
 ### Text Formatting Guidelines
-- **Regular text is just text** - no code blocks for normal content
-- Only use ``` code blocks for actual programming code
-- Mathematical variables: always use $$...$$ notation
-- Keep paragraphs ≤4 lines
-- Prefer bullet points for clarity
-- Sentences ≤22 words when possible
+- TITLE: First line must be an H1 with the document’s exact original title as it appears in the material. Do not paraphrase. If the exact title cannot be determined, use: "# {fallback_title}".
+- STRUCTURE: Mirror the document’s section hierarchy using markdown headings (##, ###) that correspond to the source sections. Do not invent new sections.
+- **Regular text is plain paragraphs** — never place non-code content inside code fences.
+- Only use ``` code blocks for real programming code present in the material.
+- Mathematical variables: always use $$...$$ notation.
+- Keep paragraphs concise (≤4 lines) and use bullets for dense lists from the source.
 
 ## INTERACTIVE PROCESS VISUALIZATION
 
@@ -125,8 +127,7 @@ Create a stepsjson block when the source material explicitly describes:
 ## STRUCTURE YOUR GUIDE
 
 ### 1. Title & Overview
-- Create an engaging, outcome-focused title
-- Brief orientation (if valuable): What, Why, Learning Objectives (3-5 bullets)
+- Begin with the exact document title as H1. Optionally include a very brief orientation if present in the source (What, Why, Learning Objectives).
 
 ### 2. Core Content Organization
 
@@ -137,10 +138,10 @@ First occurrence only, provide layers:
 - **Key Insight:** Why this matters or how it connects (if explicitly supported)
 
 **For Processes/Workflows:**
-- First describe the overall process goal
-- If ≥3 explicit action steps exist, create a stepsjson block
-- Follow with any additional context or tips
-- Include common pitfalls if mentioned in source
+- First describe the overall process goal.
+- If ≥3 explicit action steps exist, create a stepsjson block.
+- Follow with any additional context or tips.
+- Include common pitfalls if mentioned in source.
 
 **For Relationships/Comparisons:**
 - Highlight causal links, contrasts, hierarchies
@@ -204,19 +205,19 @@ Only include if explicitly present in source:
 
 ## QUALITY CHECKLIST
 Before finalizing, ensure:
-- ✓ All content traceable to source
-- ✓ ≤35% of original length achieved
-- ✓ Processes with ≥3 steps have stepsjson blocks (if applicable)
-- ✓ Math properly formatted in LaTeX $$...$$
-- ✓ No regular text in code blocks
-- ✓ Questions answerable from content
-- ✓ Clear, engaging educational tone throughout
+ - ✓ First line is H1 with the exact original title (or the provided fallback)
+ - ✓ Structure mirrors the document’s own sections and order
+ - ✓ All content traceable to source; no external additions
+ - ✓ Processes with ≥3 steps have stepsjson blocks (if applicable)
+ - ✓ Math properly formatted in LaTeX $$...$$
+ - ✓ No regular text in code blocks; code fences only for real code
+ - ✓ Clear, engaging educational tone throughout
 
 Return ONLY the final markdown study guide with any embedded stepsjson blocks.
 """
 
 # Function to handle non-PDF image files
-async def process_image_via_gemini(image_path: str, mode: str = "overview") -> Tuple[str, str]:
+async def process_image_via_gemini(image_path: str, mode: str = "overview", title: Optional[str] = None) -> Tuple[str, str]:
     """
     Process a single image file directly to markdown through Gemini API.
 
@@ -237,8 +238,18 @@ async def process_image_via_gemini(image_path: str, mode: str = "overview") -> T
         model = get_gemini_model()
         # Pick prompt based on mode
         if (mode or "overview").lower() == "overview":
+            exact_title = (title or "Overview").strip()
             markdown_prompt = (
-                "Create a concise overview of this image content. Focus on main topics, key concepts, and any obvious formulas in (LaTeX in $$...$$). Keep it brief, well-structured, and student-friendly. "
+                "You will generate a VERY SHORT overview for the provided image content.\n"
+                "\n"
+                "STRICT OUTPUT RULES (MANDATORY):\n"
+                f"- First line must be an H1 with the exact title provided: '# {exact_title}'. Do not alter it.\n"
+                "- Follow with ONE short paragraph (60–120 words) summarizing purpose, scope, and key ideas.\n"
+                "- If mathematical content is present, include key formula(s) in proper LaTeX using $$...$$.\n"
+                "- No other headings, lists, tables, images, or code blocks. Paragraph only.\n"
+                "- Do NOT include page counts, citations, or links.\n"
+                "\n"
+                "Return ONLY the markdown described above."
             )
         else:
             markdown_prompt = _generate_educational_markdown_prompt()
@@ -272,7 +283,7 @@ async def process_image_via_gemini(image_path: str, mode: str = "overview") -> T
 
 
 # Function to handle PDF files
-async def process_pdf_via_gemini(pdf_path: str, mode: str = "overview") -> Tuple[str, str, int]:
+async def process_pdf_via_gemini(pdf_path: str, mode: str = "overview", title: Optional[str] = None) -> Tuple[str, str, int]:
     """
     Process a PDF file directly to markdown through Gemini API.
 
@@ -302,12 +313,22 @@ async def process_pdf_via_gemini(pdf_path: str, mode: str = "overview") -> Tuple
         model = get_gemini_model()
         # Pick prompt based on mode
         if (mode or "overview").lower() == "overview":
+            exact_title = (title or "Overview").strip()
             markdown_prompt = (
-                f"Source material: ~{page_count} pages.\n"
-                "Create a concise overview of this PDF. Focus on main topics, key concepts, important formulas (LaTeX in $$...$$), and high-yield insights. Keep it brief and well-structured (≤ 2000 words)."
+                f"Source material: ~{page_count} pages.\n"  # metadata for the model; not for output
+                "You will generate a VERY SHORT overview for the provided PDF.\n"
+                "\n"
+                "STRICT OUTPUT RULES (MANDATORY):\n"
+                f"- First line must be an H1 with the exact title provided: '# {exact_title}'. Do not alter it.\n"
+                "- Follow with ONE short paragraph (60–120 words) summarizing purpose, scope, key concepts, and main results.\n"
+                "- If mathematical content appears, include key formula(s) in proper LaTeX using $$...$$.\n"
+                "- No other headings, lists, tables, images, or code blocks. Paragraph only.\n"
+                "- Do NOT include page counts, citations, or links.\n"
+                "\n"
+                "Return ONLY the markdown described above."
             )
         else:
-            markdown_prompt = _generate_educational_markdown_prompt(page_count)
+            markdown_prompt = _generate_educational_markdown_prompt(page_count, title_fallback=title)
         try:
             markdown_response = await model.generate_content_async(
                 [
@@ -344,12 +365,22 @@ async def process_pdf_via_gemini(pdf_path: str, mode: str = "overview") -> Tuple
                 text = text[:200_000]
             # Choose matching fallback prompt
             if (mode or "overview").lower() == "overview":
+                exact_title = (title or "Overview").strip()
                 base_prompt = (
                     f"Source material: ~{page_count} pages.\n"
-                    "Create a concise overview of this document from the extracted text below. Focus on main topics, key concepts, and high-yield formulas (LaTeX in $$...$$). Keep it brief."
+                    "You will generate a VERY SHORT overview from the extracted text below.\n"
+                    "\n"
+                    "STRICT OUTPUT RULES (MANDATORY):\n"
+                    f"- First line must be an H1 with the exact title provided: '# {exact_title}'. Do not alter it.\n"
+                    "- Follow with ONE short paragraph (60–120 words) summarizing purpose, scope, key concepts, and main results.\n"
+                    "- If mathematical content appears, include key formula(s) in proper LaTeX using $$...$$.\n"
+                    "- No other headings, lists, tables, images, or code blocks. Paragraph only.\n"
+                    "- Do NOT include page counts, citations, or links.\n"
+                    "\n"
+                    "Return ONLY the markdown described above.\n"
                 )
             else:
-                base_prompt = _generate_educational_markdown_prompt(page_count)
+                base_prompt = _generate_educational_markdown_prompt(page_count, title_fallback=title)
             fallback_prompt = base_prompt + "\n\n[BEGIN EXTRACTED TEXT]\n" + text + "\n[END EXTRACTED TEXT]"
             markdown_response = await model.generate_content_async(
                 fallback_prompt,

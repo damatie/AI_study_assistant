@@ -80,9 +80,13 @@ async def generate_light_overview(material_id: str) -> None:
 
                 try:
                     if _is_pdf(mat.file_name or ""):
-                        _, md, page_count = await process_pdf_via_gemini(tmp_path, mode="overview")
+                        _, md, page_count = await process_pdf_via_gemini(
+                            tmp_path, mode="overview", title=(mat.title or mat.file_name or "Overview")
+                        )
                     elif _is_image(mat.file_name or ""):
-                        _, md = await process_image_via_gemini(tmp_path, mode="overview")
+                        _, md = await process_image_via_gemini(
+                            tmp_path, mode="overview", title=(mat.title or mat.file_name or "Overview")
+                        )
                     else:
                         md = "# Overview Processing Failed\n\nUnsupported file type."
                 finally:
@@ -147,9 +151,13 @@ async def generate_detailed_notes(material_id: str) -> None:
 
                 try:
                     if _is_pdf(mat.file_name or ""):
-                        _, md, page_count = await process_pdf_via_gemini(tmp_path, mode="detailed")
+                        _, md, page_count = await process_pdf_via_gemini(
+                            tmp_path, mode="detailed", title=(mat.title or mat.file_name or "Study Notes")
+                        )
                     elif _is_image(mat.file_name or ""):
-                        _, md = await process_image_via_gemini(tmp_path, mode="detailed")
+                        _, md = await process_image_via_gemini(
+                            tmp_path, mode="detailed", title=(mat.title or mat.file_name or "Study Notes")
+                        )
                     else:
                         md = "# Processing Failed\n\nUnsupported file type."
                 finally:
