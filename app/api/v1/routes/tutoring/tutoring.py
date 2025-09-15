@@ -273,7 +273,7 @@ def _derive_hint_and_questions(markdown: str, title: str) -> Tuple[str, List[str
 
     # Prioritize question styles aligned with study flow
     if topics:
-        suggestions.append(f"How does the '{topics[0]}' section relate to the main goal of {base}?")
+        suggestions.append(f"What are the most important takeaways from the '{topics[0]}' section in {base}?")
 
     # If preprocessing or feature terms appear, suggest targeted questions
     def contains_any(words: list[str]) -> bool:
@@ -293,7 +293,7 @@ def _derive_hint_and_questions(markdown: str, title: str) -> Tuple[str, List[str
         suggestions.append("What is the role of the primary model described, and what is its key strength in this context?")
 
     if has_math:
-        suggestions.append("Explain the key equation or derivation and when it applies.")
+        suggestions.append("Explain the key equation or relationship and when it applies.")
 
     # Metrics and validation patterns
     if contains_any(["accuracy", "precision", "recall", "f1", "auc", "roc"]):
@@ -301,23 +301,50 @@ def _derive_hint_and_questions(markdown: str, title: str) -> Tuple[str, List[str
     if contains_any(["cross-validation", "k-fold", "fold", "train-test", "validation"]):
         suggestions.append("Why is k‑fold cross‑validation considered more robust than a single train‑test split?")
 
+    # If domain-specific triggers were sparse, synthesize prompts from top terms
+    def add(q: str):
+        if q and q not in suggestions:
+            suggestions.append(q)
+
+    # Use top key terms to craft generic but material-aware prompts
+    top = key_terms[:5]
+    if top:
+        add(f"Define '{top[0]}' in simple terms and explain its role in {base}.")
+    if len(top) >= 2:
+        add(f"How does '{top[0]}' relate to '{top[1]}' according to {base}?")
+    if len(top) >= 3:
+        add(f"Give a concrete example or case that illustrates '{top[0]}' or '{top[1]}'.")
+
+    # Detect common contrast pairs present in general textbooks (order-independent)
+    def present(*terms: str) -> bool:
+        s = text.lower()
+        return all(t in s for t in terms)
+
+    # Generic contrast pairs (not domain-locked)
+    if present("intensive", "extensive"):
+        add("Contrast intensive vs. extensive properties with brief examples.")
+    if present("open", "closed") and "isolated" in text.lower():
+        add("Compare open, closed, and isolated systems and how energy/matter exchange differs.")
+    if present("microscopic", "macroscopic"):
+        add("Relate microscopic vs. macroscopic descriptions and when each is useful.")
+
+    # Metrics and validation patterns (already added above) may have filled some slots.
+
     # Trim duplicates and empties, preserve order
     seenq = set()
     suggestions = [q for q in suggestions if q and not (q in seenq or seenq.add(q))]
 
-    # Ensure exactly 4 suggestions with focused fallbacks
+    # Ensure exactly 4 suggestions with neutral study fallbacks
     fallbacks = [
-        "What is the primary goal addressed, and what sensitive inputs/outputs are involved?",
-        "List reasons why this problem matters in practice.",
-        "What are the main limitations of traditional approaches mentioned here?",
-        "Summarize the practical steps in the core method described.",
+        "What central question does this material address, and why does it matter?",
+        "Clarify the key definitions and how they differ.",
+        "What assumptions or constraints are stated or implied?",
+        "Summarize the main process or method described.",
     ]
     fi = 0
     while len(suggestions) < 4 and fi < len(fallbacks):
-        # Avoid duplicates
         if fallbacks[fi] not in suggestions:
             suggestions.append(fallbacks[fi])
         fi += 1
 
-    # Trim to exactly 4
     return hint, suggestions[:4]
