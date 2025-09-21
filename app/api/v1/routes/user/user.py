@@ -81,12 +81,20 @@ async def get_profile(
             sub.period_end.isoformat() if sub and plan.price_pence != 0 else None
         ),
         "usage_tracking": {
-            "uploads_count":         usage.uploads_count,
-            "uploads_limit":         plan.monthly_upload_limit,
-            "assessments_count":     usage.assessments_count,
-            "assessments_limit":     plan.monthly_assessment_limit,
-            "asked_questions_count": usage.asked_questions_count,
-            "questions_limit":       plan.monthly_ask_question_limit,
+            "uploads": {
+                "used": usage.uploads_count,
+                "monthly_limit": plan.monthly_upload_limit,
+                "per_upload_pages_limit": plan.pages_per_upload_limit,
+            },
+            "assessments": {
+                "used": usage.assessments_count,
+                "monthly_limit": plan.monthly_assessment_limit,
+                "per_assessment_questions_limit": plan.questions_per_assessment,
+            },
+            "questions": {
+                "asked": usage.asked_questions_count,
+                "monthly_limit": plan.monthly_ask_question_limit,
+            },
         }
     }
 

@@ -28,61 +28,41 @@ from app.services.ai_service.assessment_service import generate_assessment_quest
 from app.utils.enums import SubscriptionStatus
 from app.core.config import settings
 
-# Initialize logger
+# Initialize logger and model
 logger = logging.getLogger(__name__)
-
-# Initialize Gemini model for short answer grading
 model = get_gemini_model()
 
-# Per‑assessment question limit for Freemium
+# Defaults and router
 DEFAULT_MAX_QUESTIONS = settings.DEFAULT_MAX_QUESTIONS
-
-# Create router
 router = APIRouter(prefix="/assessments", tags=["assessments"])
 
 
 # Data models
 class Assessment(BaseModel):
-    material_id: Optional[uuid.UUID] = Field(
-        None,
-        description="UUID of the study material for context",
-        example="3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    )
-    topic: str = Field(
-        ..., description="The topic of your choice", example="Photosynthesis"
-    )
-    difficulty: Literal["easy", "medium", "hard"] = "medium"
-    question_types: List[
-        Literal["multiple_choice", "true_false", "short_answer", "flash_cards"]
-    ] = [
-        "multiple_choice"
-    ]
-    num_questions: Optional[int] = 5  # Default to 5 questions per type
+    material_id: uuid.UUID
+    topic: Optional[str] = None
+    difficulty: Optional[str] = None
+    question_types: List[str] = Field(default_factory=list)
+    num_questions: Optional[int] = None
 
     @field_validator("difficulty", mode="before")
-    def normalize_difficulty(cls, v):
-        # accept "Easy", "EASY", etc., but store as lowercase
-        if isinstance(v, str):
-            return v.lower()
-        return v
-    
-    @field_validator("topic")
-    def topic_not_empty(cls, v):
-        if v is None or v.strip() == "":
-            raise ValueError("Topic cannot be empty")
-        return v.strip()
+    @classmethod
+    def _norm_diff(cls, v):
+        if v is None:
+            return v
+        s = str(v).lower()
+        return s if s in {"easy", "medium", "hard"} else "medium"
 
     @field_validator("num_questions")
-    def validate_num_questions(cls, v):
-        if v is not None and v < 5:
-            raise ValueError("Number of questions must be at least 5")
-        return v
+    @classmethod
+    def _norm_num(cls, v):
+        return int(v) if v is not None else v
 
 
 class GradeAssessment(BaseModel):
     question_index: int
-    question_type: Literal["multiple_choice","true_false","short_answer"]
-    student_answer: Optional[str| bool]
+    question_type: Literal["multiple_choice", "true_false", "short_answer"]
+    student_answer: Optional[str | bool] = None
 
 
 class BulkGradeAssessment(BaseModel):
@@ -150,23 +130,38 @@ async def generate_assessment(
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
-    # 7. Build content (optional topic filter)
+    # 7. Build content (content-only; no topic slicing)
     # Prefer processed markdown envelope (detailed → overview), falling back to raw content
     from app.utils.processed_payload import get_detailed, get_overview
-    base_md = get_detailed(mat.processed_content) or get_overview(mat.processed_content) or (mat.content or "")
+    detailed = get_detailed(mat.processed_content)
+    overview = None if detailed else get_overview(mat.processed_content)
+    base_md = detailed or overview or (mat.content or "")
+    source_label = "processed.detailed" if detailed else ("processed.overview" if overview else "raw")
 
-    # Clean for AI consumption
+    # Clean and truncate for AI consumption to keep latency and cost predictable
     from app.services.material_processing_service.markdown_parser import (
-        extract_topic_from_markdown,
         clean_markdown_for_context,
+        smart_truncate_markdown,
     )
+    pre_len = len(base_md or "")
     content = clean_markdown_for_context(base_md)
+    cleaned_len = len(content)
+    # Scale budget with requested number of questions (approx 4k chars per Q), capped for safety
+    budget = min(4000 * num, 60000)
+    content = smart_truncate_markdown(content, budget_chars=budget)
+    final_len = len(content)
 
-    if assessment_data.topic and content:
-        # Extract specific topic content from markdown
-        topic_content = extract_topic_from_markdown(content, assessment_data.topic)
-        if topic_content and topic_content != content:  # Topic was found
-            content = topic_content
+    # Observability: log selection and sizes (debug level)
+    logger.debug(
+        "assessment_content_source=%s pre_len=%d cleaned_len=%d final_len=%d budget=%d user_id=%s material_id=%s",
+        source_label,
+        pre_len,
+        cleaned_len,
+        final_len,
+        budget,
+        str(current_user.id),
+        str(mat.id),
+    )
 
     # 8. LLM generate each type
     payload = {}
@@ -321,27 +316,49 @@ async def get_assessment(
         correct = total = 0
 
         for s in subs:
-            submissions.append({
+            item = {
                 "question_index": s.question_index,
                 "question_type": s.question_type,
                 "student_answer": s.student_answer,
                 "correct_answer": s.correct_answer,
-                "feedback": s.feedback,
-                "score": s.score,
                 "created_at": s.created_at.isoformat(),
-            })
+            }
+
+            # objective correctness & scoring
             if s.question_type in ["multiple_choice", "true_false"]:
                 total += 1
                 if s.student_answer == s.correct_answer:
                     correct += 1
+                if s.score is not None:
+                    item["score"] = s.score
+                if s.is_correct is not None:
+                    item["is_correct"] = s.is_correct
+
+            # feedback: pass-through; DB is already normalized to {score, details} for short_answer
+            fb = s.feedback
+            if fb is not None:
+                # Optional guard: warn if short_answer feedback isn't the expected v2 dict shape
+                if s.question_type == "short_answer":
+                    if not (isinstance(fb, dict) and {"score", "details"}.issubset(set(fb.keys()))):
+                        logger.warning(
+                            "short_answer_feedback_unexpected_shape session_id=%s qidx=%s type=%s shape=%s",
+                            str(sess.id), s.question_index, s.question_type, type(fb).__name__,
+                        )
+                item["feedback"] = fb
+
+            submissions.append(item)
 
         final_score = f"{int((correct / total * 100) if total else 0)}%"
 
         # 4) Assemble payload
+        # Fetch material title for a better UX on detail page
+        mat = await db.get(StudyMaterialModel, sess.material_id)
+        material_title = mat.title if mat else None
         data = {
             "session_id": str(sess.id),
             "material_id": str(sess.material_id),
             "topic": sess.topic,
+            "material_title": material_title,
             "difficulty": sess.difficulty,
             "question_types": sess.question_types,
             "questions_payload": sess.questions_payload,
@@ -446,48 +463,141 @@ async def submit_assessment_bulk(
         elif ans.question_type == "short_answer":
             # Make sure we have a string to work with
             student_answer = str(ans.student_answer) if ans.student_answer is not None else ""
-            
+
             mat = await db.get(StudyMaterialModel, sess.material_id)
-            context = mat.content if mat else ""
+            # Simple context, ensure it's a string before slicing (processed_content may be a dict)
+            raw_ctx = ""
+            if mat:
+                # Prefer raw content if present; otherwise processed_content
+                raw_ctx = mat.content or mat.processed_content or ""
+            if not isinstance(raw_ctx, str):
+                try:
+                    raw_ctx = json.dumps(raw_ctx, ensure_ascii=False)
+                except Exception:
+                    raw_ctx = str(raw_ctx)
+            # Keep a generous cap to avoid huge prompts while minimizing information loss
+            context_text = raw_ctx[:12000]
 
+            # Prompt: strict JSON only with markdown details (bold, hyphen bullets, blockquotes), max 200 words
             prompt = f"""
-                You are an AI tutor. The student answered:
+You are an expert educator grading strictly against the provided course material. Speak directly to the student using "you" language.
 
-                QUESTION:
-                {question_text}
+QUESTION: {question_text}
+STUDENT ANSWER: {student_answer}
+COURSE MATERIAL: {context_text}
 
-                STUDENT ANSWER:
-                {student_answer}
+Instructions:
+- Evaluate only against the course material. Do not invent facts.
+- Adapt tone based on the student's answer (encouraging, guiding, corrective as needed).
+- Return ONLY valid JSON with exactly these keys and no extra text, no backticks, no code fences:
+    - "score": "X/10" where X is an integer from 0 to 10
+    - "details": clean markdown (MAX 200 words) that may include:
+        - **bold** for emphasis when it helps
+        - hyphen bullet points (-) or short lists when clearer
+        - > blockquotes when directly referencing the course material
+        - supportive tone if unsure, constructive tone for misconceptions, affirming tone for partial credit
+    - natural references to the course material (not formulaic)
+"""
 
-                REFERENCE CONTEXT:
-                {context}
-
-                Evaluate their answer: 
-                - Acknowledge what they got right,
-                - Point out missing depth or points,
-                - Cite the importance of those points from the context,
-                - Suggest how to improve.
-                - Rate their answer out of 10 (e.g., "2/10", "7/10").
-
-                OUTPUT FORMAT:
-                Return JSON with keys:
-                "feedback", "score", "key_points_addressed", "missing_points", "improvement_suggestions"
-            """
             resp = await model.generate_content_async(prompt)
             text = resp.text
+
+            def _clean_details(s: str, max_words: int = 200) -> str:
+                """Preserve helpful markdown (bold, bullets, blockquotes), remove disallowed wrappers, and cap word count.
+
+                - Removes code fences and inline backticks.
+                - Removes leading labels like 'score:' or 'details:' (case-insensitive).
+                - Preserves newlines to keep bullet structure; collapses 3+ newlines to 2.
+                - Caps total words across lines to max_words without forcing trailing punctuation.
+                """
+                import re as _re
+                if not s:
+                    return ""
+                # Strip surrounding code fences and inline code markers
+                s = _re.sub(r"```[\s\S]*?```", " ", s)
+                s = s.replace("`", "")
+                # Remove explicit label lines we never want
+                s = _re.sub(r"(?im)^(\s*)(score|details|model\s*answer|why|study\s*next)\s*:\s*", r"\1", s)
+                # Trim outer whitespace but keep internal newlines
+                s = s.strip()
+                # Collapse excessive blank lines (3+ to 2)
+                s = _re.sub(r"\n{3,}", "\n\n", s)
+                # Enforce word cap while keeping line breaks
+                def _cap_words(text: str, limit: int) -> str:
+                    parts = []
+                    count = 0
+                    for line in text.splitlines():
+                        tokens = line.split()
+                        if not tokens:
+                            parts.append("")
+                            continue
+                        if count >= limit:
+                            break
+                        remaining = limit - count
+                        if len(tokens) > remaining:
+                            tokens = tokens[:remaining]
+                        parts.append(" ".join(tokens))
+                        count += len(tokens)
+                    return "\n".join(parts).rstrip()
+
+                s = _cap_words(s, max_words)
+                return s
+
+            def _fallback_compact_feedback(obj: dict) -> dict:
+                """Return a minimal {score, details} object as a single helpful paragraph."""
+                score_str = obj.get("score") or "0/10"
+                # Prefer a direct feedback string if available
+                fb = str(obj.get("feedback") or obj.get("details") or "").strip()
+
+                def _first_sentence(text_: str) -> str:
+                    t = text_.replace("\n", " ").strip()
+                    return t if t else "Focus on the core concept asked."
+
+                details_ = _clean_details(_first_sentence(fb), max_words=200)
+                return {"score": str(score_str), "details": details_}
+
+            def _normalize_score(raw_val) -> str:
+                """Normalize score to 'X/10' string with X in [0,10]."""
+                import re as _re
+                try:
+                    if isinstance(raw_val, (int, float)):
+                        x = int(round(float(raw_val)))
+                        x = max(0, min(10, x))
+                        return f"{x}/10"
+                    s = str(raw_val).strip()
+                    # Extract first number
+                    m = _re.search(r"(\d+(?:\.\d+)?)", s)
+                    if m:
+                        x = int(round(float(m.group(1))))
+                        x = max(0, min(10, x))
+                        return f"{x}/10"
+                except Exception:
+                    pass
+                return "0/10"
+
             try:
                 payload = text
                 if "```json" in text:
-                    payload = text.split("```json")[1].split("```")[0].strip()
+                    payload = text.split("```json")[1].split("```", 1)[0].strip()
                 elif "```" in text:
-                    payload = text.split("```")[1].strip()
-                grading = json.loads(payload)
+                    payload = text.split("```", 1)[1].strip()
+                parsed = json.loads(payload)
+                if isinstance(parsed, dict) and {"score", "details"}.issubset(parsed.keys()):
+                    det = _clean_details(str(parsed.get("details", "")), max_words=200)
+                    grading = {"score": _normalize_score(parsed.get("score")), "details": det}
+                else:
+                    # Build from whatever we got back
+                    built = _fallback_compact_feedback(parsed if isinstance(parsed, dict) else {"feedback": text})
+                    built["details"] = _clean_details(built.get("details", ""), max_words=200)
+                    grading = built
             except Exception:
-                grading = {"feedback": text, "score": None}
+                # Fallback: compress raw text to a single concise sentence/paragraph
+                raw = _clean_details(str(text or "").strip(), max_words=200)
+                model_line = raw or "Review the core concept asked and answer directly."
+                grading = {"score": "0/10", "details": model_line}
 
-            feedback = grading.get("feedback")
-            # We're getting the score but not using it for the database
-            # Instead, we'll keep it in the grading dictionary
+            # Persist the full grading dict in feedback for short_answer
+            feedback = grading
 
         else:
             raise HTTPException(status_code=400, detail="Unsupported question type")
@@ -506,13 +616,17 @@ async def submit_assessment_bulk(
         )
         db.add(sub)
 
-        results.append({
+        # Omit null fields to avoid "score": null style responses
+        result_item = {
             "question_index": ans.question_index,
             "question_type": ans.question_type,
-            "is_correct": is_correct,
-            "score": score,
             "feedback": feedback,
-        })
+        }
+        if is_correct is not None:
+            result_item["is_correct"] = is_correct
+        if score is not None:
+            result_item["score"] = score
+        results.append(result_item)
 
     # 5. Complete session
     sess.current_index = total_expected

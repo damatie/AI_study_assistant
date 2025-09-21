@@ -6,42 +6,7 @@ from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
-def extract_topic_from_markdown(markdown_content: str, topic_name: str) -> str:
-    """
-    Extract specific topic content from markdown for targeted assessment generation
-    
-    Args:
-        markdown_content: The full markdown content
-        topic_name: The topic name to search for
-        
-    Returns:
-        Extracted topic content or full content if topic not found
-    """
-    try:
-        # Find topic sections in markdown using multiple patterns
-        patterns = [
-            # Pattern 1: ### Topic Name: ...
-            rf"### .*{re.escape(topic_name)}.*?\n(.*?)(?=###|\Z)",
-            # Pattern 2: ## Topic Name
-            rf"## .*{re.escape(topic_name)}.*?\n(.*?)(?=##|\Z)",
-            # Pattern 3: # Topic Name
-            rf"# .*{re.escape(topic_name)}.*?\n(.*?)(?=#|\Z)",
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, markdown_content, re.DOTALL | re.IGNORECASE)
-            if match:
-                extracted_content = match.group(1).strip()
-                logger.info(f"Found topic '{topic_name}' using pattern: {pattern[:50]}...")
-                return extracted_content
-        
-        # If no specific topic found, return full content
-        logger.info(f"Topic '{topic_name}' not found, returning full content")
-        return markdown_content
-        
-    except Exception as e:
-        logger.exception(f"Error extracting topic '{topic_name}': {str(e)}")
-        return markdown_content
+"""Markdown cleaning and truncation utilities for AI context preparation."""
 
 
 def clean_markdown_for_context(markdown_content: Any) -> str:
@@ -83,3 +48,48 @@ def clean_markdown_for_context(markdown_content: Any) -> str:
     except Exception as e:
         logger.exception(f"Error cleaning markdown: {str(e)}")
         return markdown_content
+
+
+def smart_truncate_markdown(markdown_content: str, budget_chars: int = 20000) -> str:
+    """
+    Truncate markdown to a character budget while trying to preserve section boundaries.
+
+    Strategy:
+    - If content length <= budget, return as-is.
+    - Split by ATX headings (lines starting with 1-6 '#' chars).
+    - Accumulate sections in order until reaching the budget.
+    - Ensure at least the first section is included; if it's longer than the
+      budget, return its leading slice up to budget.
+    """
+    try:
+        if not isinstance(markdown_content, str):
+            markdown_content = str(markdown_content or "")
+        if len(markdown_content) <= budget_chars:
+            return markdown_content
+
+        # Split on headings but keep the delimiter by using a lookahead
+        parts = re.split(r"(?=^#{1,6}\s)", markdown_content, flags=re.MULTILINE)
+        if not parts or len(parts) == 1:
+            # No headings found; hard truncate
+            return markdown_content[:budget_chars]
+
+        out: list[str] = []
+        total = 0
+        for idx, section in enumerate(parts):
+            sec_len = len(section)
+            if total + sec_len <= budget_chars:
+                out.append(section)
+                total += sec_len
+            else:
+                # If nothing has been added yet, fall back to slicing the first section
+                if not out:
+                    return section[:budget_chars]
+                break
+
+        merged = "".join(out)
+        # Safety check if empty due to unexpected parsing; fall back to head slice
+        return merged or markdown_content[:budget_chars]
+    except Exception as e:
+        logger.exception(f"Error smart-truncating markdown: {str(e)}")
+        # Fallback: naive truncate
+        return (markdown_content or "")[:budget_chars]
