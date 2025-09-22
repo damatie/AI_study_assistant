@@ -66,7 +66,7 @@ class GradeAssessment(BaseModel):
 
 
 class BulkGradeAssessment(BaseModel):
-    session_id: str
+    session_id: uuid.UUID
     answers: List[GradeAssessment]
 
 
@@ -210,9 +210,8 @@ async def generate_assessment(
                 )
                 payload["true_false"] = r["questions"]
 
-    # 9. Persist the session
+    # 9. Persist the session (let DB generate UUID id)
     sess = SessionModel(
-        id=str(uuid.uuid4()),
         user_id=current_user.id,
         material_id=mat.id,
         topic=assessment_data.topic,
@@ -292,14 +291,20 @@ async def list_assessments(
     response_model=ResponseModel,
 )
 async def get_assessment(
-    session_id: str,
+    session_id: str,  # Accept as string first, then convert
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a specific assessment session by ID"""
     try:
-        # 1) Load session and authorize
-        sess = await db.get(SessionModel, session_id)
+        # 1) Convert string to UUID and load session
+        try:
+            session_uuid = uuid.UUID(session_id)
+        except ValueError as e:
+            logger.warning(f"Invalid UUID format for session_id={session_id}: {e}")
+            return error_response("Invalid session ID format", status_code=status.HTTP_400_BAD_REQUEST)
+            
+        sess = await db.get(SessionModel, session_uuid)
         if not sess or sess.user_id != current_user.id:
             return error_response("Assessment session not found", status_code=status.HTTP_404_NOT_FOUND)
 
@@ -316,23 +321,25 @@ async def get_assessment(
         correct = total = 0
 
         for s in subs:
+            qtype = s.question_type.value if hasattr(s.question_type, "value") else str(s.question_type)
             item = {
                 "question_index": s.question_index,
-                "question_type": s.question_type,
+                "question_type": qtype,
                 "student_answer": s.student_answer,
                 "correct_answer": s.correct_answer,
-                "created_at": s.created_at.isoformat(),
+                "created_at": s.created_at.isoformat() if getattr(s, "created_at", None) else None,
             }
 
             # objective correctness & scoring
             if s.question_type in ["multiple_choice", "true_false"]:
                 total += 1
-                if s.student_answer == s.correct_answer:
+                is_correct = s.student_answer == s.correct_answer
+                if is_correct:
                     correct += 1
                 if s.score is not None:
                     item["score"] = s.score
-                if s.is_correct is not None:
-                    item["is_correct"] = s.is_correct
+                # Add calculated is_correct field
+                item["is_correct"] = is_correct
 
             # feedback: pass-through; DB is already normalized to {score, details} for short_answer
             fb = s.feedback
@@ -354,18 +361,22 @@ async def get_assessment(
         # Fetch material title for a better UX on detail page
         mat = await db.get(StudyMaterialModel, sess.material_id)
         material_title = mat.title if mat else None
+        # Normalize enums to plain strings for JSON safety
+        diff = sess.difficulty.value if hasattr(sess.difficulty, "value") else str(sess.difficulty)
+        stat = sess.status.value if hasattr(sess.status, "value") else str(sess.status)
+
         data = {
             "session_id": str(sess.id),
             "material_id": str(sess.material_id),
             "topic": sess.topic,
             "material_title": material_title,
-            "difficulty": sess.difficulty,
+            "difficulty": diff,
             "question_types": sess.question_types,
             "questions_payload": sess.questions_payload,
             "current_index": sess.current_index,
-            "status": sess.status,
-            "created_at": sess.created_at.isoformat(),
-            "updated_at": sess.updated_at.isoformat(),
+            "status": stat,
+            "created_at": sess.created_at.isoformat() if getattr(sess, "created_at", None) else None,
+            "updated_at": sess.updated_at.isoformat() if getattr(sess, "updated_at", None) else None,
             "submissions": submissions,
             "final_score": final_score,
         }
@@ -375,8 +386,8 @@ async def get_assessment(
     except HTTPException:
         # Re-raise our controlled 404
         raise
-    except Exception:
-        # Any other error becomes a 404
+    except Exception as e:
+        logger.error(f"Unexpected error in get_assessment for session {session_id}: {e}", exc_info=True)
         return error_response("Assessment session not found", status_code=status.HTTP_404_NOT_FOUND)
 
 
@@ -647,7 +658,7 @@ Instructions:
     response_model=ResponseModel,
 )
 async def restart_assessment(
-    session_id: str,
+    session_id: uuid.UUID,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
