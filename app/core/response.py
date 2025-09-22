@@ -2,6 +2,7 @@
 from typing import Any, Optional, Literal, Dict
 from pydantic import BaseModel, Field
 from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 import traceback
 from app.core.config import settings
 
@@ -37,7 +38,7 @@ def success_response(
     payload = ResponseModel(status="success", msg=msg, data=data).model_dump(
         exclude_none=True
     )
-    return JSONResponse(status_code=status_code, content=payload)
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(payload))
 
 
 def error_response(
@@ -71,7 +72,7 @@ def error_response(
             debug_info=debug_info
         ).model_dump(exclude_none=True)
     
-    return JSONResponse(status_code=status_code, content=payload)
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(payload))
 
 
 def validation_error_response(

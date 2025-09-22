@@ -8,6 +8,7 @@ from .assessment_session import AssessmentSession
 from .submission import Submission
 from .subscription import Subscription
 from .transaction import Transaction
+from .flash_card_set import FlashCardSet
 
 __all__ = [
     "Plan",
@@ -18,4 +19,5 @@ __all__ = [
     "Submission",
     "Subscription",
     "Transaction"
+    ,"FlashCardSet"
 ]
