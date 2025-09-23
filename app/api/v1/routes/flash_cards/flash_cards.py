@@ -29,6 +29,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/flash-cards", tags=["flash-cards"])
 
 
+def _ensure_hints(cards: list[dict]) -> list[dict]:
+    """Guarantee a non-empty hint for each card based on information or prompt."""
+    out: list[dict] = []
+    for c in cards or []:
+        if not isinstance(c, dict):
+            continue
+        prompt = str(c.get("prompt", "")).strip()
+        info = str(c.get("correspondingInformation", "")).strip()
+        hint = c.get("hint")
+        if hint is None or not str(hint).strip():
+            # derive basic hint from first sentence of info, else prompt
+            # keep it short
+            base = info.split(". ")[0] if info else prompt
+            hint = (base or "").strip()[:100]
+        out.append({
+            "prompt": prompt,
+            "correspondingInformation": info,
+            "hint": hint,
+        })
+    return out
+
+
 @router.get("/", response_model=ResponseModel)
 async def list_sets(
     current_user=Depends(get_current_user),
@@ -81,6 +103,35 @@ async def get_latest_by_material(
     )
 
 
+@router.get("/by-material/{material_id}/all", response_model=ResponseModel)
+async def list_by_material(
+    material_id: uuid.UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = (
+        select(FlashCardSet)
+        .where(
+            FlashCardSet.user_id == current_user.id,
+            FlashCardSet.material_id == material_id,
+        )
+        .order_by(FlashCardSet.created_at.desc())
+    )
+    res = await db.execute(stmt)
+    rows: List[FlashCardSet] = list(res.scalars().all())
+    data = [
+        {
+            "id": row.id,
+            "title": row.title,
+            "topic": row.topic,
+            "difficulty": row.difficulty,
+            "count": len(row.cards_payload or []),
+        }
+        for row in rows
+    ]
+    return success_response("Sets fetched", data=data)
+
+
 @router.get("/{set_id}", response_model=ResponseModel)
 async def get_set(
     set_id: uuid.UUID,
@@ -98,7 +149,7 @@ async def get_set(
         "title": row.title,
         "topic": row.topic,
         "difficulty": row.difficulty,
-        "cards": row.cards_payload or [],
+    "cards": _ensure_hints(row.cards_payload or []),
     }
     return success_response("Set fetched", data=out)
 
@@ -178,7 +229,7 @@ async def generate_set(
             "title": row.title,
             "topic": row.topic,
             "difficulty": row.difficulty,
-            "cards": row.cards_payload,
+            "cards": _ensure_hints(row.cards_payload or []),
         },
     )
 

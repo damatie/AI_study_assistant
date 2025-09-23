@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import List, Dict, Any, Optional
 
 from app.core.genai_client import get_gemini_model
@@ -18,11 +19,11 @@ SYSTEM_INSTRUCTIONS = (
     "    {\n"
     "      \"prompt\": string (<= 160 chars),\n"
     "      \"correspondingInformation\": string (2-6 sentences),\n"
-    "      \"hint\": string | null\n"
+    "      \"hint\": string (a concise clue, <= 100 chars)\n"
     "    }\n"
     "  ]\n"
     "}\n"
-    "Prompts must be concise; information must be accurate and self-contained."
+    "Every card must include a helpful, concise hint. Prompts must be concise; information must be accurate and self-contained."
 )
 
 
@@ -32,6 +33,11 @@ def _coerce_list(obj: Any) -> List[Any]:
     if obj is None:
         return []
     return [obj]
+
+
+def _first_sentence(text: str) -> str:
+    parts = re.split(r"(?<=[.!?])\s+", text.strip()) if text else []
+    return parts[0] if parts else ""
 
 
 def _normalize_cards(raw_cards: Any) -> List[Dict[str, Any]]:
@@ -46,6 +52,10 @@ def _normalize_cards(raw_cards: Any) -> List[Dict[str, Any]]:
             hint = str(hint).strip() or None
 
         if prompt and info:
+            # Fallback hint if missing/empty: derive from first sentence of info, else from prompt
+            if not hint:
+                candidate = _first_sentence(info) or prompt
+                hint = (candidate[:100]).strip()
             cards.append({
                 "prompt": prompt[:160],
                 "correspondingInformation": info,
