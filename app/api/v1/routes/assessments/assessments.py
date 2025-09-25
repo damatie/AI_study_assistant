@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # Local imports
 from app.core.genai_client import get_gemini_model
 from app.core.response import success_response, error_response, ResponseModel
+from app.core.plan_limits import plan_limit_error
 from app.db.deps import get_db
 from app.models.plan import Plan as PlanModel
 from app.models.study_material import StudyMaterial as StudyMaterialModel
@@ -42,7 +43,7 @@ class Assessment(BaseModel):
     material_id: uuid.UUID
     topic: Optional[str] = None
     difficulty: Optional[str] = None
-    question_types: List[str] = Field(default_factory=list)
+    question_types: List[Literal["multiple_choice", "true_false", "short_answer"]] = Field(default_factory=list)
     num_questions: Optional[int] = None
 
     @field_validator("difficulty", mode="before")
@@ -87,25 +88,20 @@ async def generate_assessment(
     plan = await db.get(PlanModel, current_user.plan_id)
     usage = await get_or_create_usage(current_user, db)
     if usage.assessments_count >= plan.monthly_assessment_limit:
-        return error_response(
-            msg="You've reached your monthly assessment‑generation limit. Upgrade to continue.",
-            data={"error_type":"MONTHLY_ASSESSMENT_LIMIT_EXCEEDED","current_plan":plan.name},
-            status_code=status.HTTP_403_FORBIDDEN,
+        return plan_limit_error(
+            message="You've reached your monthly assessment‑generation limit. Upgrade to continue.",
+            error_type="MONTHLY_ASSESSMENT_LIMIT_EXCEEDED",
+            current_plan=plan.name,
+            metric="monthly_assessments",
+            used=usage.assessments_count,
+            limit=plan.monthly_assessment_limit,
         )
 
-    # 3. Check if flash_cards or short_answer is mixed with other question types
-    has_flash_cards = "flash_cards" in assessment_data.question_types
+    # 3. Validate requested question types (short_answer cannot mix with others)
     has_short_answer = "short_answer" in assessment_data.question_types
-    has_other_types = any(qt not in ["flash_cards", "short_answer"] for qt in assessment_data.question_types)
+    has_other_types = any(qt not in ["short_answer"] for qt in assessment_data.question_types)
 
-    if has_flash_cards and (has_short_answer or has_other_types):
-        return error_response(
-            msg="Flash cards cannot be combined with other question types. Please select either flash cards or other question types.",
-            data={"error_type": "INCOMPATIBLE_QUESTION_TYPES"},
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-    
-    if has_short_answer and (has_flash_cards or has_other_types):
+    if has_short_answer and has_other_types:
         return error_response(
             msg="Short answer questions cannot be combined with other question types. Please select either short answer or other question types.",
             data={"error_type": "INCOMPATIBLE_QUESTION_TYPES"},
@@ -120,17 +116,16 @@ async def generate_assessment(
     # 5. Enforce per‑assessment question limit
     num = assessment_data.num_questions or DEFAULT_MAX_QUESTIONS
     if num > plan.questions_per_assessment:
-        return error_response(
-            msg=f"You can request at most {plan.questions_per_assessment} questions per assessment on your current plan. Please upgrade to create larger assessments.",
-            data={
-                "error_type": "QUESTIONS_PER_ASSESSMENT_LIMIT_EXCEEDED",
-                "current_plan": plan.name,
-                "limit": plan.questions_per_assessment,
-            },
-            status_code=status.HTTP_400_BAD_REQUEST,
+        return plan_limit_error(
+            message=f"You can request at most {plan.questions_per_assessment} questions per assessment on your current plan. Please upgrade to create larger assessments.",
+            error_type="QUESTIONS_PER_ASSESSMENT_LIMIT_EXCEEDED",
+            current_plan=plan.name,
+            metric="questions_per_assessment",
+            actual=num,
+            limit=plan.questions_per_assessment,
         )
 
-    # 7. Build content (content-only; no topic slicing)
+    # 7. Build content
     # Prefer processed markdown envelope (detailed → overview), falling back to raw content
     from app.utils.processed_payload import get_detailed, get_overview
     detailed = get_detailed(mat.processed_content)
@@ -169,11 +164,7 @@ async def generate_assessment(
     # Strategy for distributing questions among types
     selected_types = [qt for qt in assessment_data.question_types]
 
-    if "flash_cards" in selected_types:
-        # Flash cards don't mix, so use all questions for them
-        r = await generate_assessment_questions(content, "generate_fc", num_questions=num, difficulty=assessment_data.difficulty )
-        payload["flash_cards"] = r["flash_cards"]
-    elif "short_answer" in selected_types:
+    if "short_answer" in selected_types:
         # Short answer questions don't mix either, use all questions for them
         r = await generate_assessment_questions(content, "generate_sa", num_questions=num, difficulty=assessment_data.difficulty)
         payload["short_answer"] = r["questions"]

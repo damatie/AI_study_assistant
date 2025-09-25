@@ -17,3 +17,9 @@ class MaterialStatus(str, enum.Enum):
     processing = "processing"
     completed  = "completed"
     failed     = "failed"
+
+
+class FlashCardStatus(str, enum.Enum):
+    processing = "processing"
+    completed  = "completed"
+    failed     = "failed"

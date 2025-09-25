@@ -68,6 +68,7 @@ async def get_profile(
         "last_name":         current_user.last_name,
         "role":              current_user.role.value,
         "plan_name":         plan.name,
+        "plan_sku":          getattr(plan, "sku", None),
         "amount":            amount,
         "is_active":         current_user.is_active,
         "is_email_verified": current_user.is_email_verified,
@@ -94,6 +95,11 @@ async def get_profile(
             "questions": {
                 "asked": usage.asked_questions_count,
                 "monthly_limit": plan.monthly_ask_question_limit,
+            },
+            "flash_cards": {
+                "used": getattr(usage, "flash_card_sets_count", 0),
+                "monthly_limit": getattr(plan, "monthly_flash_cards_limit", 0),
+                "per_deck_cards_limit": getattr(plan, "max_cards_per_deck", 0),
             },
         }
     }

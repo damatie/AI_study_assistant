@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 # Local imports
 from app.core.response import success_response, error_response, ResponseModel
+from app.core.plan_limits import plan_limit_error
 from app.db.deps import get_db
 from app.models.plan import Plan as PlanModel
 from app.models.study_material import StudyMaterial as StudyMaterialModel
@@ -73,10 +74,13 @@ async def ask_question(
     plan = await db.get(PlanModel, current_user.plan_id)
     usage = await get_or_create_usage(current_user, db)
     if usage.asked_questions_count >= plan.monthly_ask_question_limit:
-        return error_response(
-            msg="You've reached your monthly question‑asking limit. Upgrade to ask more.",
-            data={"error_type":"MONTHLY_QUESTION_LIMIT_EXCEEDED","current_plan":plan.name},
-            status_code=status.HTTP_403_FORBIDDEN,
+        return plan_limit_error(
+            message="You've reached your monthly question‑asking limit. Upgrade to ask more.",
+            error_type="MONTHLY_QUESTION_LIMIT_EXCEEDED",
+            current_plan=plan.name,
+            metric="monthly_questions",
+            used=usage.asked_questions_count,
+            limit=plan.monthly_ask_question_limit,
         )
 
     # 3. Build context if provided

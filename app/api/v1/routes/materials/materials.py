@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 # Local imports
 from app.core.response import success_response, error_response, ResponseModel
+from app.core.plan_limits import plan_limit_error
 from app.db.deps import get_db
 from app.models.plan import Plan as PlanModel
 from app.models.study_material import StudyMaterial as StudyMaterialModel
@@ -63,10 +64,13 @@ async def upload_material(
     plan = await db.get(PlanModel, current_user.plan_id)
     usage = await get_or_create_usage(current_user, db)
     if usage.uploads_count >= plan.monthly_upload_limit:
-        return error_response(
-            msg="You've reached your monthly upload limit. Upgrade to upload more.",
-            data={"error_type":"MONTHLY_UPLOAD_LIMIT_EXCEEDED","current_plan":plan.name},
-            status_code=status.HTTP_403_FORBIDDEN,
+        return plan_limit_error(
+            message="You've reached your monthly upload limit. Upgrade to upload more.",
+            error_type="MONTHLY_UPLOAD_LIMIT_EXCEEDED",
+            current_plan=plan.name,
+            metric="monthly_uploads",
+            used=usage.uploads_count,
+            limit=plan.monthly_upload_limit,
         )
 
     accepted_exts = {".pdf", ".jpg", ".jpeg", ".png"}
@@ -98,10 +102,13 @@ async def upload_material(
                 # Use centralized PDF page count function
                 page_count = get_pdf_page_count_from_bytes(content_bytes)
                 if page_count > plan.pages_per_upload_limit:
-                    return error_response(
-                        msg=f"This file has {page_count} pages, exceeding your plan limit of {plan.pages_per_upload_limit}.",
-                        data={"error_type":"PAGES_PER_UPLOAD_LIMIT_EXCEEDED","current_plan":plan.name},
-                        status_code=status.HTTP_400_BAD_REQUEST,
+                    return plan_limit_error(
+                        message=f"This file has {page_count} pages, exceeding your plan limit of {plan.pages_per_upload_limit}.",
+                        error_type="PAGES_PER_UPLOAD_LIMIT_EXCEEDED",
+                        current_plan=plan.name,
+                        metric="pages_per_upload",
+                        actual=page_count,
+                        limit=plan.pages_per_upload_limit,
                     )
             except Exception as e:
                 logger.warning(f"Could not verify PDF pages in memory: {e}")

@@ -97,64 +97,27 @@ async def generate_assessment_questions(
                                         ]
                                 }}
                 """,
-                                                                "generate_fc": f"""
-                From the content below, generate {num_questions} flash cards designed for effective learning and recall.
-
-                {CRITICAL_INSTRUCTIONS}
-
-                Each flashcard must contain:
-                - "prompt": concise question/term/cue
-                - "correspondingInformation": direct answer/definition/explanation
-                - "hint": brief clue that guides recall without revealing the answer
-
-                CONTENT:
-                {text}
-
-                Difficulty: {difficulty}
-
-                OUTPUT FORMAT (STRICT JSON, NO CODE FENCES):
-                                Return a JSON with the structure (escape backslashes in LaTeX):
-                                {{
-                                        "flash_cards": [
-                                                {{
-                                                        "prompt": "...",
-                                                        "correspondingInformation": "...",
-                                                        "hint": "..."
-                                                }}
-                                        ]
-                                }}
-                """,
+                # NOTE: Flash card generation has moved to the dedicated Flash Cards service.
                 }
 
                 if operation_type not in prompts:
-                        raise ValueError(f"Invalid operation type: {operation_type}")
+                        # Flash cards are no longer supported here; use Flash Cards API instead.
+                        raise ValueError(f"Invalid operation type for assessments: {operation_type}")
 
                 try:
                         response = await model.generate_content_async(prompts[operation_type])
                 except Exception as e:
                         logger.error(f"Error calling Gemini API in generate_assessment_questions: {str(e)}")
-                        if operation_type == "generate_fc":
-                                return {
-                                        "flash_cards": [
-                                                {
-                                                        "prompt": "Study the provided material",
-                                                        "correspondingInformation": "Review the content and key concepts from your study material",
-                                                        "hint": "Focus on the main topics and important details",
-                                                }
-                                                for _ in range(min(num_questions, 3))
-                                        ]
-                                }
-                        else:
-                                base_q = {"question": "Based on the study material, explain the key concepts."}
-                                if operation_type == "generate_tf":
-                                        base_q.update({"correct_answer": True, "explanation": "Fallback due to temporary issue."})
-                                if operation_type == "generate_mc":
-                                        base_q.update({
-                                                "options": ["Option A", "Option B", "Option C", "Option D"],
-                                                "correct_answer": "Option A",
-                                                "explanation": "Fallback due to temporary issue.",
-                                        })
-                                return {"questions": [base_q for _ in range(min(num_questions, 3))]}
+                        base_q = {"question": "Based on the study material, explain the key concepts."}
+                        if operation_type == "generate_tf":
+                                base_q.update({"correct_answer": True, "explanation": "Fallback due to temporary issue."})
+                        if operation_type == "generate_mc":
+                                base_q.update({
+                                        "options": ["Option A", "Option B", "Option C", "Option D"],
+                                        "correct_answer": "Option A",
+                                        "explanation": "Fallback due to temporary issue.",
+                                })
+                        return {"questions": [base_q for _ in range(min(num_questions, 3))]}
 
                 try:
                         response_text = response.text
@@ -166,9 +129,7 @@ async def generate_assessment_questions(
 
                         result = json.loads(json_str)
 
-                        if operation_type == "generate_fc" and "flash_cards" not in result:
-                                raise ValueError("Response missing 'flash_cards' key")
-                        elif operation_type != "generate_fc" and operation_type != "summarize" and "questions" not in result:
+                        if operation_type != "summarize" and "questions" not in result:
                                 raise ValueError("Response missing 'questions' key")
 
                         return result

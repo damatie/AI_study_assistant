@@ -2,6 +2,7 @@ from typing import List, Optional, Annotated
 from pydantic import BaseModel, Field
 from uuid import UUID
 from app.models.assessment_session import Difficulty
+from app.utils.enums import FlashCardStatus
 
 
 class FlashCardItem(BaseModel):
@@ -25,6 +26,7 @@ class FlashCardSetOut(FlashCardSetBase):
     id: UUID
     user_id: UUID
     material_id: Optional[UUID] = None
+    status: Optional[FlashCardStatus] = None
     cards: List[FlashCardItem]
 
     class Config:
@@ -36,6 +38,7 @@ class FlashCardSetListItem(BaseModel):
     title: str
     topic: Optional[str] = None
     difficulty: Difficulty
+    status: Optional[FlashCardStatus] = None
     count: int
 
 

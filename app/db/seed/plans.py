@@ -12,6 +12,7 @@ default_plans = [
     Plan(
         id=uuid.uuid4(),
         name="Freemium",
+        sku="FREEMIUM",
         price_pence=0,
         monthly_upload_limit=3,
         pages_per_upload_limit=5,
@@ -24,6 +25,7 @@ default_plans = [
     Plan(
         id=uuid.uuid4(),
         name="Basic",
+        sku="BASIC",
         price_pence=499,
         monthly_upload_limit=15,
         pages_per_upload_limit=15,
@@ -36,6 +38,7 @@ default_plans = [
     Plan(
         id=uuid.uuid4(),
         name="Premium",
+        sku="PREMIUM",
         price_pence=799,
         monthly_upload_limit=999999,
         pages_per_upload_limit=999999,
