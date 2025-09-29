@@ -290,4 +290,14 @@ async def verify_redirect(session_id: str, redirect: Optional[str] = None, db: A
             txn.subscription = new_sub
             db.add(txn)
 
+            # Keep user's effective plan in sync with the activated subscription
+            user_res = await db.execute(select(User).where(User.id == user_id))
+            user = user_res.scalars().first()
+            if user and user.plan_id != plan.id:
+                user.plan_id = plan.id
+                db.add(user)
+
+        # Persist changes so the row isn't left pending if webhook misses
+        await db.commit()
+
     return RedirectResponse(url=redirect_to, status_code=302)

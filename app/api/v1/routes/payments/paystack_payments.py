@@ -74,13 +74,23 @@ async def init_paystack_for_plan(*, db: AsyncSession, current_user, plan: PlanMo
     if not amount_minor or amount_minor <= 0:
         raise HTTPException(status_code=422, detail="Invalid amount for Paystack checkout")
 
+    # Build callback URL, preserving intended redirect target if provided (to match Stripe behavior)
+    callback_url = f"{api_base}/api/v1/payments/paystack/verify-redirect"
+    try:
+        if redirect_url:
+            from urllib.parse import quote
+            callback_url = f"{callback_url}?redirect={quote(redirect_url, safe='')}"
+    except Exception:
+        # Fallback silently to base callback if quoting fails
+        pass
+
     payload = {
         "email": current_user.email,
         # Paystack expects minor units
         "amount": amount_minor,
         # Currency can be NGN, USD, GBP depending on account configuration
         "currency": currency,
-        "callback_url": f"{api_base}/api/v1/payments/paystack/verify-redirect",
+        "callback_url": callback_url,
         # Optional metadata for reconciliation
         "metadata": {
             "user_id": str(current_user.id),
@@ -285,16 +295,22 @@ async def paystack_verify_redirect(trxref: str | None = None, reference: str | N
     """
     ref = reference or trxref
     frontend_base = (settings.FRONTEND_APP_URL or "http://localhost:3000").rstrip("/")
+    # Default to dashboard if no redirect is provided anywhere
     redirect_to = redirect or f"{frontend_base}/dashboard?paid=1#plans"
 
     if not ref:
         # If reference is missing, just redirect back to dashboard
         return RedirectResponse(url=redirect_to, status_code=302)
 
-    # Reuse the verify logic
+    # Reuse the verify logic, and attempt to pull metadata.redirect if not provided in query
     try:
+        # Call verify and inspect any metadata in Paystack response by re-calling their API
         result = await paystack_verify(VerifyRequest(reference=ref), db)
-        # Regardless of result, redirect to target; frontend will refresh profile
+        if (not redirect) and isinstance(result, dict) and result.get("status") == "success":
+            # Best effort: if we had access to Paystack response, we'd read metadata.redirect here.
+            # Our paystack_verify already updates DB; we can look up the transaction to fetch stored info if needed.
+            # For safety and simplicity, we rely on the callback_url query param we set at init time above.
+            pass
     except Exception:
         # Swallow errors and redirect
         pass
