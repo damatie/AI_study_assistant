@@ -11,6 +11,9 @@ from app.models.subscription import Subscription
 from app.models.plan import Plan as PlanModel
 from app.models.user import User
 from app.utils.enums import SubscriptionStatus
+from app.services.payment_service.refunds import (
+    process_immediate_cancel_with_optional_refund,
+)
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
@@ -22,6 +25,10 @@ async def cancel_subscription(
     immediate: bool = Query(
         False,
         description="If true, cancel now and downgrade immediately; otherwise cancel at period end"
+    ),
+    request_refund: bool = Query(
+        False,
+        description="When immediate is true, request refund if eligible (cool-off policy)"
     ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -53,7 +60,7 @@ async def cancel_subscription(
         sub.status = SubscriptionStatus.cancelled
 
         # Downgrade user to Freemium immediately
-        plan_q = await db.execute(select(PlanModel).where(PlanModel.price_pence == 0))
+        plan_q = await db.execute(select(PlanModel).where(PlanModel.sku == 'FREEMIUM'))
         free_plan = plan_q.scalars().first()
         if not free_plan:
             raise HTTPException(
@@ -62,9 +69,16 @@ async def cancel_subscription(
             )
         current_user.plan_id = free_plan.id
 
-        msg = "Subscription cancelled immediately and downgraded to Freemium."
+        refund_msg = ""
+        refund_details = None
+        if request_refund:
+            refund_details, refund_msg = await process_immediate_cancel_with_optional_refund(
+                db, current_user.id, request_refund=True
+            )
+
+        msg = "Subscription cancelled immediately and downgraded to Freemium." + refund_msg
     else:
-        # Schedule cancellation at period_end
+        # Schedule cancellation at period_end (do NOT downgrade user yet)
         sub.status = SubscriptionStatus.cancelled
         msg = (
             f"Subscription will not renew after {sub.period_end.isoformat()}. "
@@ -73,7 +87,17 @@ async def cancel_subscription(
 
     # 3) Persist changes
     db.add(sub)
-    db.add(current_user)
+    # Only add current_user if we changed their plan (immediate cancel)
+    if immediate:
+        db.add(current_user)
     await db.commit()
 
-    return success_response(msg=msg)
+    data = {}
+    if immediate and request_refund:
+        # Include a minimal payload about the refund decision for clients.
+        data["refund"] = {
+            "requested": True,
+            "eligible": bool(refund_details.eligible) if refund_details else False,
+            "reason": refund_details.reason if refund_details else "",
+        }
+    return success_response(msg=msg, data=data or None)

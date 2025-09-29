@@ -1,5 +1,6 @@
 # Standard library imports
 from contextlib import asynccontextmanager
+import asyncio
 
 # Third-party imports
 from fastapi import FastAPI, Request
@@ -14,6 +15,7 @@ from app.api.v1.routes.router import router as api_v1_router
 from app.core.config import settings
 from app.core.response import error_response, validation_error_response
 from app.db.seed.plans import seed_all
+from app.services.payments.ttl_expirer import run_ttl_expirer_task
 
 
 # Initialize seeding plans table
@@ -22,8 +24,15 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown operations."""
     # Startup: Run before the application starts accepting requests
     await seed_all()
+    # Start background TTL expirer task
+    ttl_task = asyncio.create_task(run_ttl_expirer_task(poll_seconds=60))
     yield
     # Shutdown: Run when the application is shutting down
+    try:
+        ttl_task.cancel()
+        await ttl_task
+    except Exception:
+        pass
 
 
 # Initialize FastAPI

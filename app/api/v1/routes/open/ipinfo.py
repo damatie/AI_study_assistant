@@ -17,7 +17,7 @@ async def get_ip_info():
     """
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get("https://ipapi.co/json/")
+            resp = await client.get("https://ipapi.co/41.184.254.94/json/")
             resp.raise_for_status()
             data = resp.json()
     except httpx.HTTPError as e:

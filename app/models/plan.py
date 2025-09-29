@@ -4,6 +4,7 @@ from sqlalchemy import Column, String, Integer, Enum
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship
 from app.db.deps import Base
+from typing import List
 
 
 class SummaryDetail(str, enum.Enum):
@@ -24,7 +25,6 @@ class Plan(Base):
     name = Column(String, nullable=False, unique=True)
     # Stable, immutable business identifier (e.g., FREE, PRO, PREMIUM)
     sku = Column(String(64), nullable=False, unique=True)
-    price_pence = Column(Integer, nullable=False)
     monthly_upload_limit = Column(Integer, nullable=False)
     pages_per_upload_limit = Column(Integer, nullable=False)
     monthly_assessment_limit = Column(Integer, nullable=False)
@@ -39,3 +39,4 @@ class Plan(Base):
     ai_feedback_level = Column(Enum(AIFeedbackLevel), nullable=False)
 
     users = relationship("User", back_populates="plan")
+    prices = relationship("PlanPrice", back_populates="plan", cascade="all, delete-orphan")

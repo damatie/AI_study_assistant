@@ -16,10 +16,11 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     GOOGLE_API_KEY: str
     HOST: str = "0.0.0.0"
-    PORT: int = 8100
+    PORT: int = 8101
     DEBUG: bool = False
     ENVIRONMENT: str = "development"
     APP_URL: str
+    FRONTEND_APP_URL: str | None = None
     LOGO: str = 'https://res.cloudinary.com/webmataz/image/upload/v1748798978/Assets/logo_hkakvj.png'
     
     # CORS settings
@@ -77,6 +78,9 @@ class Settings(BaseSettings):
     R2_PUBLIC_BASE_URL: str | None = None
     R2_ACCOUNT_ID: str | None = None  # not used but allowed
 
+    # Refund policy
+    REFUND_COOL_OFF_HOURS: int = 24
+
 
 def _normalize_settings(settings: Settings) -> None:
     """Normalize alternative environment variable names into canonical ones."""
@@ -107,6 +111,9 @@ def _validate_settings(settings: Settings) -> None:
     # Environment-specific validations
     if settings.ENVIRONMENT == "production" and settings.DEBUG:
         print("WARNING: DEBUG is enabled in production. Consider setting DEBUG=False.")
+    # In production, require explicit FRONTEND_APP_URL so we never fall back to localhost
+    if settings.ENVIRONMENT == "production" and not settings.FRONTEND_APP_URL:
+        raise ValueError("FRONTEND_APP_URL is required in production")
 
 
 # Initialize settings with error handling

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.subscription import Subscription
 from app.models.plan import Plan
 from app.models.transaction import Transaction
-from app.utils.enums import SubscriptionStatus, TransactionStatus
+from app.utils.enums import SubscriptionStatus, TransactionStatus, PaymentProvider
 from app.models.user import User
 
 async def renew_subscription_for_user(
@@ -19,14 +19,15 @@ async def renew_subscription_for_user(
     Returns the active subscription, even if downgraded on failure.
     """
     today = date.today()
-    # 1.  Look for an already-active subscription
+    # 1.  Look for a subscription covering today
     q = await db.execute(
         select(Subscription)
         .where(
             Subscription.user_id == user.id,
             Subscription.period_start <= today,
             Subscription.period_end > today,
-            Subscription.status == SubscriptionStatus.active
+            # Treat a scheduled-cancel (status=cancelled) as still valid until period_end
+            Subscription.status.in_([SubscriptionStatus.active, SubscriptionStatus.cancelled])
         )
     )
     sub = q.scalars().first()
@@ -49,8 +50,18 @@ async def renew_subscription_for_user(
     start = today
     end   = today + relativedelta(months=1)
 
+    # If the last subscription was scheduled to cancel and the period just ended,
+    # do NOT attempt a paid renewal; downgrade to Freemium for the next period.
+    if last and last.status == SubscriptionStatus.cancelled and last.period_end <= today:
+        free_plan = (await db.execute(select(Plan).where(Plan.sku == 'FREEMIUM'))).scalars().first()
+        if free_plan:
+            user.plan_id = free_plan.id
+            db.add(user)
+            await db.commit()
+            plan = free_plan
+
     # 4. Handle free vs paid
-    if plan.price_pence == 0:
+    if (plan.sku or '').upper() == 'FREEMIUM':
         # FREEMIUM: auto‐renew without any transaction record
         new_sub = Subscription(
             id=uuid.uuid4(),
@@ -65,58 +76,48 @@ async def renew_subscription_for_user(
         await db.refresh(new_sub)
         return new_sub
 
-    # PAID PLAN: create a pending‐payment transaction
-    #  give it a placeholder reference so it is never NULL
+    # PAID PLAN: we do not auto-charge here. Record a failed renewal and downgrade immediately.
+    # Create a pending transaction with provider=stripe for visibility; then mark failed.
     txn_ref = str(uuid.uuid4())
     txn = Transaction(
-        id            = uuid.uuid4(),
-        user_id       = user.id,
-        subscription_id=None,            # link after success
-        reference     = txn_ref,
+        id=uuid.uuid4(),
+        user_id=user.id,
+        subscription_id=None,
+        reference=txn_ref,
         authorization_url=None,
-        amount_pence  = plan.price_pence,
-        currency      = "GBP",
-        status        = TransactionStatus.pending,
+        provider=PaymentProvider.stripe,
+        amount_pence=0,
+        currency="GBP",
+        status=TransactionStatus.pending,
     )
     db.add(txn)
-    await db.commit()
-    await db.refresh(txn)
-    # TODO: replace with real payment gateway call
-    payment_ok = await fake_gateway_charge(user, plan.price_pence)
+    await db.flush()
 
-    if payment_ok:
-        # mark transaction success and link to subscription
-        txn.status = TransactionStatus.success
+    # Mark failed since auto-renewal via payment gateway isn't executed here
+    txn.status = TransactionStatus.failed
+
+    # Expire most recent subscription if exists
+    if last:
+        last.status = SubscriptionStatus.expired
+        db.add(last)
+
+    # Downgrade user to free plan for the new period
+    free_plan = (await db.execute(select(Plan).where(Plan.sku == 'FREEMIUM'))).scalars().first()
+    if free_plan:
+        user.plan_id = free_plan.id
+        db.add(user)
+
+        # Create a free active subscription for the new period
         new_sub = Subscription(
-            id=str(uuid.uuid4()),
+            id=uuid.uuid4(),
             user_id=user.id,
-            plan_id=plan.id,
+            plan_id=free_plan.id,
             period_start=start,
             period_end=end,
             status=SubscriptionStatus.active,
         )
         db.add(new_sub)
-        await db.flush()
-        txn.subscription_id = new_sub.id
-        await db.commit()
-        return new_sub
-    else:
-        # failed: mark transaction, expire old, downgrade user
-        txn.status = TransactionStatus.failed
-        # expire most recent if exists
-        if last:
-            last.status = SubscriptionStatus.expired
-            db.add(last)
-        # downgrade user to free plan
-        free_plan = (await db.execute(select(Plan).where(Plan.price_pence == 0))).scalars().first()
-        user.plan_id = free_plan.id
-        db.add(user)
-        await db.commit()
-         # TODO:Send email to notify user
-        return await renew_subscription_for_user(user, db)
-    
-#fake
-async def fake_gateway_charge(user, amount_pence):
-    # Replace with real API call to Stripe/PayPal/etc.
-    # Return True if payment succeeds, False otherwise.
-    return False  # or True for testing
+
+    await db.commit()
+    # Optionally: send notification email about failed renewal
+    return await renew_subscription_for_user(user, db)
