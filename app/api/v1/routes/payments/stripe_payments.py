@@ -174,8 +174,8 @@ async def verify_checkout(
 
     payment_status = session.get("payment_status")
 
-    # Best-effort dev fallback: if webhook couldn't hit localhost, finalize here
-    if settings.ENVIRONMENT != "production" and payment_status in ("paid", "no_payment_required"):
+    # Best-effort fallback: if webhook didn't finalize yet, finalize here when Stripe session is paid
+    if payment_status in ("paid", "no_payment_required"):
         # Find pending txn
         txn_q = await db.execute(select(Transaction).where(Transaction.reference == session_id))
         txn = txn_q.scalars().first()
@@ -218,7 +218,7 @@ async def verify_checkout(
                 pass
             txn.subscription = new_sub
             db.add(txn)
-            # Sync user's plan to keep profile consistent in dev
+            # Sync user's plan to keep profile consistent
             user_res = await db.execute(select(User).where(User.id == current_user.id))
             user = user_res.scalars().first()
             if user and user.plan_id != plan.id:
@@ -245,9 +245,9 @@ async def verify_redirect(session_id: str, redirect: Optional[str] = None, db: A
         # Redirect regardless; user can refresh profile
         return RedirectResponse(url=redirect_to, status_code=302)
 
-    # In dev, if webhook couldn't process, finalize here
+    # Fallback finalize if Stripe says paid (works in all environments)
     payment_status = session.get("payment_status")
-    if settings.ENVIRONMENT != "production" and payment_status in ("paid", "no_payment_required"):
+    if payment_status in ("paid", "no_payment_required"):
         txn_q = await db.execute(select(Transaction).where(Transaction.reference == session_id))
         txn = txn_q.scalars().first()
         plan_id = session.get("metadata", {}).get("plan_id")

@@ -178,6 +178,11 @@ async def paystack_verify(
     if status_str == "success":
         txn.status = TransactionStatus.success
         txn.status_reason = None
+        try:
+            txn.status_message = None
+            txn.failure_code = None
+        except Exception:
+            pass
         # Ensure there is an active subscription for this user/plan
         if txn.subscription_id:
             sub = await db.get(SubscriptionModel, txn.subscription_id)
@@ -397,6 +402,7 @@ async def paystack_webhook(
                     )
                     for other in others_q.scalars().all():
                         other.status = TransactionStatus.failed
+                        other.status_reason = TransactionStatusReason.superseded
                         db.add(other)
             except Exception:
                 pass
