@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship
 
 from app.db.deps import Base
-from app.utils.enums import PaymentProvider
+from app.utils.enums import PaymentProvider, BillingInterval
 
 
 class RegionScopeType(str, enum.Enum):
@@ -33,6 +33,13 @@ class PlanPrice(Base):
     provider = Column(Enum(PaymentProvider), nullable=False)
     price_minor = Column(Integer, nullable=False)  # minor units (kobo, cents, pence)
     provider_price_id = Column(String, nullable=True)  # Stripe price id (optional)
+    # New: billing interval support
+    billing_interval = Column(
+        Enum(BillingInterval, values_callable=lambda x: [e.value for e in x]),
+        nullable=True,  # keep nullable for backward compat; treat NULL as 'month'
+        default=BillingInterval.month,
+    )
+    interval_count = Column(Integer, nullable=False, default=1)
     scope_type = Column(
         Enum(RegionScopeType, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
@@ -53,6 +60,7 @@ class PlanPrice(Base):
             "provider",
             "scope_type",
             "scope_value",
+            "billing_interval",
             "active",
         ),
     )

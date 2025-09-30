@@ -17,6 +17,12 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Create only if not exists
+    from sqlalchemy import inspect
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    if 'plan_prices' in inspector.get_table_names(schema='public'):
+        return
     op.create_table(
         'plan_prices',
         sa.Column('id', sa.dialects.postgresql.UUID(as_uuid=True), primary_key=True),
@@ -40,5 +46,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index('ix_plan_prices_lookup', table_name='plan_prices')
-    op.drop_table('plan_prices')
+    try:
+        op.drop_index('ix_plan_prices_lookup', table_name='plan_prices')
+    except Exception:
+        pass
+    try:
+        op.drop_table('plan_prices')
+    except Exception:
+        pass

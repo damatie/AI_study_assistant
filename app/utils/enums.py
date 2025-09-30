@@ -42,3 +42,8 @@ class FlashCardStatus(str, enum.Enum):
     processing = "processing"
     completed  = "completed"
     failed     = "failed"
+
+
+class BillingInterval(str, enum.Enum):
+    month = "month"
+    year = "year"

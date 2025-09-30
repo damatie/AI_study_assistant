@@ -1,22 +1,26 @@
-# Byte-compiled / optimized / DLL files
+# OS/Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Python caches and artifacts
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
 
-# C extensions
-*.so
-
-# Distribution / packaging
-.Python
+# Build/dist
 build/
-develop-eggs/
 dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
-parts/
 sdist/
 var/
 wheels/
@@ -28,58 +32,44 @@ share/python-wheels/
 # Virtual environments
 env/
 venv/
-ENV/
 .venv/
+ENV/
 .ENV/
+.Python
+pip-wheel-metadata/
+pip-log.txt
 
-# Unit test / coverage reports
-htmlcov/
+# Coverage
 .coverage
 coverage.xml
+htmlcov/
 *,cover
-.pytest_cache/
 
-# MyPy
-.mypy_cache/
-.dmypy.json
-dmypy.json
+# Logs
+*.log
+app.log
+logs/
 
-# Pyre
-.pyre/
+# Local databases
+*.sqlite
+*.sqlite3
+*.db
 
-# Alembic (keep your versions under version control!)
-# If you want to ignore only the auto‐generated env.py, list it explicitly:
+# Env/Secrets (keep example files tracked)
+.env
+.env.*
+!.env.example
 
+# Keep docs in repo; ignore only secrets within docs
+docs/db_urls.md
 
-alembic
+# Project-specific legacy scratch files
 app/main-old.py
 app/scripts/generate_encryption_key.py
 reset_password_old.html
 
-# SQLAlchemy SQLite files
-*.db
-*.sqlite3
+# Do NOT ignore migrations/alembic folders; they must be versioned
+# (If you need to ignore only a generated env file, list it explicitly)
 
-# Logs and local files
-*.log
-logs/
-
-# dotenv environment variables file
-.env
-.env.*.local
-
-# IDEs and editors
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace
-
-# Mac
-.DS_Store
-
-# Windows
-Thumbs.db
-ehthumbs.db
- 
-### Project docs
-docs/
+# Freeze snapshot (keep locally, not in prod repo)
+requirements-freeze.txt
