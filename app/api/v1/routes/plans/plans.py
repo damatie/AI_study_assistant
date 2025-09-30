@@ -22,7 +22,8 @@ from app.api.v1.routes.auth.auth import get_current_user
 router = APIRouter(prefix="/plans", tags=["plans"])
 
 
-@router.get("/")
+@router.get("")
+@router.get("/")  # Back-compat: also serve with trailing slash to avoid redirects
 async def list_plans(
     currency: Optional[str] = Query(None, description="Optional currency hint (e.g., USD, GBP, NGN) - currently informational"),
     db: AsyncSession = Depends(get_db),
