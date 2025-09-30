@@ -63,6 +63,14 @@ logs/
 # Keep docs in repo; ignore only secrets within docs
 docs/db_urls.md
 
+# Ignore dev-only scripts and demo seeds
+app/scripts/bootstrap_schema_and_seed.py
+app/scripts/inspect_db.py
+app/db/seed/flash_cards.py
+
+# Ignore docs for production pushes
+docs/
+
 # Project-specific legacy scratch files
 app/main-old.py
 app/scripts/generate_encryption_key.py

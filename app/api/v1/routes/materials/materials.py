@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 
 # Third-party imports
 from fastapi import APIRouter, Depends, File, UploadFile, Form, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -312,6 +313,53 @@ async def get_material(
     except Exception as e:
         # Handle case when material_id doesn't exist
         raise HTTPException(status_code=404, detail="Material not found")
+
+
+class UpdateMaterialRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+
+
+@router.patch(
+    "/{material_id}",
+    response_model=ResponseModel,
+)
+async def update_material(
+    material_id: str,
+    payload: UpdateMaterialRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update fields on a study material (currently supports title)."""
+    import uuid as _uuid
+    try:
+        lookup_id = _uuid.UUID(material_id)
+    except Exception:
+        lookup_id = material_id
+
+    mat = await db.get(StudyMaterialModel, lookup_id)
+    if not mat:
+        return error_response("Material not found", status_code=status.HTTP_404_NOT_FOUND)
+
+    if mat.user_id != current_user.id:
+        return error_response(
+            "Access denied: You don't own this material", status_code=status.HTTP_403_FORBIDDEN
+        )
+
+    # Update allowed fields
+    updated = False
+    new_title = payload.title.strip()
+    if new_title and new_title != mat.title:
+        mat.title = new_title
+        updated = True
+
+    if not updated:
+        return success_response(msg="No changes", data={"id": str(mat.id), "title": mat.title})
+
+    db.add(mat)
+    await db.commit()
+    await db.refresh(mat)
+    logger.info(f"User {current_user.id} renamed material {material_id} to '{mat.title}'")
+    return success_response(msg="Material updated", data={"id": str(mat.id), "title": mat.title})
 
 
 @router.post(
