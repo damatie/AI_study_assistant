@@ -25,8 +25,15 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Override database URL from environment variable
+# Override database URL from environment variable; fallback to app settings
 database_url = os.getenv("DATABASE_URL")
+if not database_url:
+    try:
+        from app.core.config import settings as app_settings
+        database_url = app_settings.DATABASE_URL
+    except Exception:
+        database_url = None
+
 if database_url:
     config.set_main_option("sqlalchemy.url", database_url)
 

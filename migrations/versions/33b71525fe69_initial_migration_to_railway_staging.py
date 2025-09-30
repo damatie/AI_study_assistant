@@ -20,6 +20,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+    # If plans table exists, assume base schema is present and skip this migration.
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_tables = set(inspector.get_table_names(schema="public"))
+    if 'plans' in existing_tables:
+        return
     #
     # ── 1) DROP ALL EXISTING ENUM TYPES ──────────────────────────────────────────
     #
