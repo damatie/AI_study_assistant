@@ -12,7 +12,8 @@ class FlashCardSet(Base):
     id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     # Optional link to a study material for provenance/context
-    material_id = Column(PG_UUID(as_uuid=True), ForeignKey("study_materials.id"), nullable=True)
+    # CASCADE: delete flash card sets when the parent material is deleted
+    material_id = Column(PG_UUID(as_uuid=True), ForeignKey("study_materials.id", ondelete="CASCADE"), nullable=True)
 
     title = Column(String, nullable=False)
     topic = Column(String, nullable=True)

@@ -333,25 +333,61 @@ async def change_plan(
         # Allow client to force a specific price id (e.g., from selected_price_row)
         client_price_id = payload.get("provider_price_id")
         price_id_to_use = client_price_id or provider_price_id
+        # Attempt checkout creation; if a stored provider price id is invalid fall back to inline price data
         try:
             if price_id_to_use:
-                session = stripe.checkout.Session.create(
-                    mode="subscription",
-                    line_items=[
-                        {
-                            "price": price_id_to_use,
-                            "quantity": 1,
-                        }
-                    ],
-                    success_url=success_url,
-                    cancel_url=cancel_url,
-                    metadata={
-                        "user_id": str(current_user.id),
-                        "plan_id": str(plan.id),
-                        "plan_name": plan.name,
-                        "plan_sku": plan.sku,
-                    },
-                )
+                try:
+                    session = stripe.checkout.Session.create(
+                        mode="subscription",
+                        line_items=[
+                            {
+                                "price": price_id_to_use,
+                                "quantity": 1,
+                            }
+                        ],
+                        success_url=success_url,
+                        cancel_url=cancel_url,
+                        metadata={
+                            "user_id": str(current_user.id),
+                            "plan_id": str(plan.id),
+                            "plan_name": plan.name,
+                            "plan_sku": plan.sku,
+                        },
+                    )
+                except Exception as e:  # Most commonly stripe.error.InvalidRequestError for missing price
+                    msg = str(e)
+                    # Known missing price signals: resource_missing code / "No such price" message
+                    if "No such price" in msg or "resource_missing" in msg:
+                        # Fallback: create an inline price on-the-fly using our catalog amount
+                        try:
+                            session = stripe.checkout.Session.create(
+                                mode="subscription",
+                                line_items=[
+                                    {
+                                        "price_data": {
+                                            "currency": resolved_currency.lower(),
+                                            "unit_amount": amount_minor,
+                                            "recurring": {"interval": "month"},
+                                            "product_data": {"name": plan.name},
+                                        },
+                                        "quantity": 1,
+                                    }
+                                ],
+                                success_url=success_url,
+                                cancel_url=cancel_url,
+                                metadata={
+                                    "user_id": str(current_user.id),
+                                    "plan_id": str(plan.id),
+                                    "plan_name": plan.name,
+                                    "plan_sku": plan.sku,
+                                    "fallback_price": price_id_to_use,
+                                },
+                            )
+                        except Exception as fallback_err:
+                            raise HTTPException(status_code=500, detail=f"Stripe error after fallback: {fallback_err}") from fallback_err
+                    else:
+                        # Different kind of Stripe error; propagate
+                        raise HTTPException(status_code=500, detail=f"Stripe error: {e}") from e
             else:
                 session = stripe.checkout.Session.create(
                     mode="subscription",
@@ -375,8 +411,11 @@ async def change_plan(
                         "plan_sku": plan.sku,
                     },
                 )
+        except HTTPException:
+            raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Stripe error: {e}")
+            # Catch-all for unexpected errors
+            raise HTTPException(status_code=500, detail=f"Stripe error: {e}") from e
 
         # Record a pending transaction so we have a local reference immediately
         try:
