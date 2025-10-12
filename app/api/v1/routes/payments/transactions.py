@@ -60,6 +60,7 @@ async def list_transactions(
                 "status_message": getattr(tx, 'status_message', None),
                 "reference": tx.reference,
                 "authorization_url": tx.authorization_url,
+                "transaction_type": _ev(tx.transaction_type) if getattr(tx, 'transaction_type', None) else "initial",
                 "created_at": created,
                 "updated_at": updated,
                 "expires_at": tx.expires_at.isoformat() if getattr(tx, 'expires_at', None) else None,

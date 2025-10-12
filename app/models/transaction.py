@@ -6,7 +6,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.db.deps import Base
-from app.utils.enums import TransactionStatus, PaymentProvider, TransactionStatusReason
+from app.utils.enums import TransactionStatus, PaymentProvider, TransactionStatusReason, TransactionType
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -20,6 +20,20 @@ class Transaction(Base):
     amount_pence = Column(Integer, nullable=False)
     currency = Column(String, nullable=False, default="GBP")
     status = Column(Enum(TransactionStatus), nullable=False)
+    
+    # Recurring payment tracking (Stripe-specific IDs)
+    # Note: reference column above stores the primary ID (session/invoice/transaction ref)
+    # These columns provide additional Stripe-specific references for reconciliation
+    stripe_invoice_id = Column(String, nullable=True, index=True)  # Stripe invoice ID (in_...)
+    stripe_charge_id = Column(String, nullable=True)               # Stripe charge ID (ch_...)
+    
+    # Transaction type (initial checkout, recurring charge, or refund)
+    transaction_type = Column(
+        Enum(TransactionType, name='transactiontype'),
+        nullable=False,
+        default=TransactionType.initial
+    )
+    
     # Optional lifecycle metadata
     expires_at = Column(DateTime(timezone=True), nullable=True)
     # Keep DB type name stable as 'statusreason' to match migration

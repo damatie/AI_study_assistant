@@ -10,8 +10,11 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.logging_config import get_logger
 from app.core.response import success_response
 from app.db.deps import get_db
+
+logger = get_logger(__name__)
 from app.models.plan import Plan
 from app.models.subscription import Subscription
 from app.models.user import User
@@ -48,6 +51,7 @@ async def list_plans(
                     "provider_price_id": pr.provider_price_id,
                     "scope_type": pr.scope_type.value if hasattr(pr.scope_type, "value") else pr.scope_type,
                     "scope_value": pr.scope_value,
+                    "billing_interval": pr.billing_interval.value if hasattr(pr.billing_interval, "value") else pr.billing_interval,  # NEW
                 }
             )
         data.append(
@@ -135,6 +139,15 @@ async def change_plan(
         country_code = (payload.get("country_code") or "").upper()
         continent_code = (payload.get("continent_code") or "").upper()
         provider_hint = (payload.get("provider") or "auto").lower()
+        
+        # Billing interval (monthly or annual)
+        raw_billing_interval = payload.get("billing_interval")
+        logger.info(f"🔍 DEBUG: Received billing_interval from frontend: {raw_billing_interval!r} (type: {type(raw_billing_interval).__name__})")
+        billing_interval = (raw_billing_interval or "month").lower()
+        if billing_interval not in ("month", "year"):
+            logger.warning(f"⚠️ Invalid billing_interval '{billing_interval}' - defaulting to 'month'")
+            billing_interval = "month"  # Default to monthly if invalid
+        logger.info(f"✅ Final billing_interval: {billing_interval!r}")
 
         # Currency resolution (allow explicit override from client display selection)
         resolved_currency = (payload.get("currency") or "").upper()
@@ -153,6 +166,7 @@ async def change_plan(
             country_code=country_code,
             continent_code=continent_code,
             resolved_currency=resolved_currency,
+            billing_interval=billing_interval,
         )
 
         if not chosen:
@@ -261,6 +275,7 @@ async def change_plan(
                     meta = getattr(sess, "metadata", {}) or {}
                     same_plan = str(meta.get("plan_id")) == str(plan.id)
                     same_user = str(meta.get("user_id")) == str(current_user.id)
+                    same_interval = meta.get("billing_interval", "month") == billing_interval
                     # If prior session used a stale product name (e.g., "Basic"), don't reuse
                     displayed_name = None
                     try:
@@ -291,7 +306,7 @@ async def change_plan(
                     except Exception:
                         price_ok = False
 
-                    if same_plan and same_user and not name_mismatch and price_ok:
+                    if same_plan and same_user and same_interval and not name_mismatch and price_ok:
                         # Reuse this session
                         reused = True
                         return success_response(
@@ -330,10 +345,9 @@ async def change_plan(
         if pending_txns:
             await db.commit()
 
-        # Allow client to force a specific price id (e.g., from selected_price_row)
-        client_price_id = payload.get("provider_price_id")
-        price_id_to_use = client_price_id or provider_price_id
-        # Attempt checkout creation; if a stored provider price id is invalid fall back to inline price data
+        # Use backend-selected price ID based on billing_interval and location
+        price_id_to_use = provider_price_id
+        # Attempt checkout creation
         try:
             if price_id_to_use:
                 try:
@@ -352,6 +366,7 @@ async def change_plan(
                             "plan_id": str(plan.id),
                             "plan_name": plan.name,
                             "plan_sku": plan.sku,
+                            "billing_interval": billing_interval,
                         },
                     )
                 except Exception as e:  # Most commonly stripe.error.InvalidRequestError for missing price
@@ -367,7 +382,7 @@ async def change_plan(
                                         "price_data": {
                                             "currency": resolved_currency.lower(),
                                             "unit_amount": amount_minor,
-                                            "recurring": {"interval": "month"},
+                                            "recurring": {"interval": billing_interval},
                                             "product_data": {"name": plan.name},
                                         },
                                         "quantity": 1,
@@ -380,6 +395,7 @@ async def change_plan(
                                     "plan_id": str(plan.id),
                                     "plan_name": plan.name,
                                     "plan_sku": plan.sku,
+                                    "billing_interval": billing_interval,
                                     "fallback_price": price_id_to_use,
                                 },
                             )
@@ -396,7 +412,7 @@ async def change_plan(
                             "price_data": {
                                 "currency": resolved_currency.lower(),
                                 "unit_amount": amount_minor,
-                                "recurring": {"interval": "month"},
+                                "recurring": {"interval": billing_interval},
                                 "product_data": {"name": plan.name},
                             },
                             "quantity": 1,
@@ -409,6 +425,7 @@ async def change_plan(
                         "plan_id": str(plan.id),
                         "plan_name": plan.name,
                         "plan_sku": plan.sku,
+                        "billing_interval": billing_interval,
                     },
                 )
         except HTTPException:

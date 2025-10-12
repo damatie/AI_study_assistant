@@ -118,8 +118,8 @@ async def init_paystack_for_plan(*, db: AsyncSession, current_user, plan: PlanMo
         raise HTTPException(status_code=502, detail="Invalid response from Paystack: missing url/reference")
 
     # 4) Persist Transaction record
-    # Set a TTL for Paystack attempts (e.g., 60 minutes)
-    expires = datetime.now(timezone.utc) + timedelta(minutes=60)
+    # Set a TTL for Paystack attempts (7 days to accommodate bank transfers)
+    expires = datetime.now(timezone.utc) + timedelta(days=7)
     txn = TransactionModel(
         id=uuid.uuid4(),
         user_id=current_user.id,

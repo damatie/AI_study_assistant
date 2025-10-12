@@ -132,6 +132,9 @@ async def get_profile(
         subscription_status_value = SubscriptionStatus.active.value
         subscription_start_value = None
         subscription_end_value = None
+        billing_interval_value = None
+        auto_renew_value = None
+        canceled_at_value = None
     else:
         subscription_status_value = (
             sub.status.value if sub else SubscriptionStatus.expired.value
@@ -141,6 +144,15 @@ async def get_profile(
         )
         subscription_end_value = (
             sub.period_end.isoformat() if sub else None
+        )
+        billing_interval_value = (
+            sub.billing_interval.value if sub and hasattr(sub, 'billing_interval') and sub.billing_interval else None
+        )
+        auto_renew_value = (
+            sub.auto_renew if sub and hasattr(sub, 'auto_renew') else None
+        )
+        canceled_at_value = (
+            sub.canceled_at.isoformat() if sub and hasattr(sub, 'canceled_at') and sub.canceled_at else None
         )
 
     # 6. Build the profile payload
@@ -159,6 +171,9 @@ async def get_profile(
         "subscription_status": subscription_status_value,
         "subscription_start": subscription_start_value,
         "subscription_end": subscription_end_value,
+        "billing_interval": billing_interval_value,
+        "auto_renew": auto_renew_value,
+        "canceled_at": canceled_at_value,
         "usage_tracking": {
             "uploads": {
                 "used": usage.uploads_count,

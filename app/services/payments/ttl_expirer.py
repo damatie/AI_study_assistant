@@ -27,7 +27,7 @@ async def expire_stale_transactions_once() -> int:
             .values(
                 status=TransactionStatus.expired,
                 status_reason=TransactionStatusReason.ttl_elapsed,
-                status_message="Expired after 60m",
+                status_message="Payment session expired",
             )
         )
         res = await db.execute(stmt)

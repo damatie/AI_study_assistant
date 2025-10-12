@@ -161,8 +161,8 @@ async def seed_plan_prices():
                     if getattr(existing, "price_minor", None) != r.price_minor:
                         existing.price_minor = r.price_minor
                         changed = True
-                    # Update provider_price_id if provided and different
-                    if getattr(r, "provider_price_id", None) and getattr(existing, "provider_price_id", None) != r.provider_price_id:
+                    # Only set provider_price_id if currently NULL (don't overwrite real Stripe IDs)
+                    if getattr(r, "provider_price_id", None) and not getattr(existing, "provider_price_id", None):
                         existing.provider_price_id = r.provider_price_id
                         changed = True
                     if changed:
