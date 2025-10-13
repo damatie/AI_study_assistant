@@ -80,4 +80,19 @@ reset_password_old.html
 # (If you need to ignore only a generated env file, list it explicitly)
 
 # Freeze snapshot (keep locally, not in prod repo)
+
+# Additional security: Backup files and temporary edits
+*.bak
+*.backup
+*.tmp
+*.swp
+*~
+
+# Local test data and development databases
+test_data/
+local_db/
+
+# System-specific configuration files
+.python-version
+.tool-versions
 requirements-freeze.txt
