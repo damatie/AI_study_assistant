@@ -48,9 +48,7 @@ from app.services.mail_handler_service.mailer_resend import (
 
 
 from app.core.response import error_response, success_response, ResponseModel
-from app.services.track_subscription_service.handle_track_subscription import (
-    renew_subscription_for_user,
-)
+from app.services.subscription_access import create_free_subscription
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
@@ -104,7 +102,9 @@ async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
 
     # send the OTP via email to user.email
     await send_verification_email(user.email, code, user.first_name)
-    await renew_subscription_for_user(user, db)
+    
+    # Create initial free subscription for new user
+    await create_free_subscription(user, db, duration_days=30)
 
     return success_response(
         msg="Registration successful; check your email for a verification code",

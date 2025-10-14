@@ -1,7 +1,8 @@
 # app/routes/auth.py
 
-from datetime import date
+from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
+from app.utils.datetime_utils import get_current_utc_datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.api.v1.routes.auth.auth import get_current_user
@@ -48,14 +49,14 @@ async def get_profile(
         raise HTTPException(status_code=500, detail="User plan not found")
 
     # 2. Determine current subscription period
-    today = date.today()
+    now = get_current_utc_datetime()
     # Consider both active and scheduled-cancel subscriptions as current until period_end
     result = await db.execute(
         select(Subscription)
         .where(
             Subscription.user_id == current_user.id,
-            Subscription.period_start <= today,
-            Subscription.period_end > today,
+            Subscription.period_start <= now,
+            Subscription.period_end > now,
             Subscription.status.in_([SubscriptionStatus.active, SubscriptionStatus.cancelled]),
         )
     )
@@ -174,6 +175,11 @@ async def get_profile(
         "billing_interval": billing_interval_value,
         "auto_renew": auto_renew_value,
         "canceled_at": canceled_at_value,
+        "is_in_retry_period": sub.is_in_retry_period if sub else False,
+        "retry_attempt_count": sub.retry_attempt_count if sub else 0,
+        "last_payment_failure_at": (
+            sub.last_payment_failure_at.isoformat() if sub and sub.last_payment_failure_at else None
+        ),
         "usage_tracking": {
             "uploads": {
                 "used": usage.uploads_count,

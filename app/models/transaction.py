@@ -20,6 +20,7 @@ class Transaction(Base):
     amount_pence = Column(Integer, nullable=False)
     currency = Column(String, nullable=False, default="GBP")
     status = Column(Enum(TransactionStatus), nullable=False)
+    channel = Column(String, nullable=True)  # Payment channel: card, bank, bank_transfer, etc.
     
     # Recurring payment tracking (Stripe-specific IDs)
     # Note: reference column above stores the primary ID (session/invoice/transaction ref)

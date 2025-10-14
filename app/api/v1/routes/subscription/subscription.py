@@ -5,9 +5,11 @@ from sqlalchemy import select
 from datetime import date, datetime, timezone
 
 from app.db.deps import get_db
+from app.utils.datetime_utils import get_current_utc_datetime
 from app.api.v1.routes.auth.auth import get_current_user
 from app.core.response import success_response, ResponseModel
 from app.core.config import settings
+from app.core.logging_config import get_logger
 from app.models.subscription import Subscription
 from app.models.plan import Plan as PlanModel
 from app.models.user import User
@@ -15,6 +17,9 @@ from app.utils.enums import SubscriptionStatus, PaymentProvider
 from app.services.payment_service.refunds import (
     process_immediate_cancel_with_optional_refund,
 )
+from app.services.payments.subscription_service import SubscriptionService
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
@@ -31,15 +36,15 @@ async def get_current_subscription(
     Get the user's current active subscription with billing details.
     Returns subscription info including billing_interval, auto_renew status, and next billing date.
     """
-    today = date.today()
+    now = get_current_utc_datetime()
     q = await db.execute(
         select(Subscription)
         .options(select(Subscription).join(Subscription.plan))
         .where(
             Subscription.user_id == current_user.id,
             Subscription.status == SubscriptionStatus.active,
-            Subscription.period_start <= today,
-            Subscription.period_end > today
+            Subscription.period_start <= now,
+            Subscription.period_end > now
         )
     )
     sub = q.scalars().first()
@@ -93,58 +98,39 @@ async def cancel_subscription(
     - If immediate=True, subscription is ended today and user is downgraded to Freemium at once.
     """
     # 1) Load the active subscription
-    today = date.today()
+    now = get_current_utc_datetime()
     q = await db.execute(
         select(Subscription)
         .where(
             Subscription.user_id == current_user.id,
             Subscription.status == SubscriptionStatus.active,
-            Subscription.period_start <= today,
-            Subscription.period_end > today
+            Subscription.period_start <= now,
+            Subscription.period_end > now
         )
     )
     sub = q.scalars().first()
     if not sub:
         raise HTTPException(status_code=404, detail="No active subscription found")
 
-    # 2) Cancel Stripe/Paystack recurring subscription if exists
-    stripe_cancel_msg = ""
-    if sub.stripe_subscription_id and not immediate:
-        # Cancel Stripe subscription at period end
-        try:
-            from app.api.v1.routes.payments.stripe_payments import _init_stripe
-            import stripe
-            
-            _init_stripe()
-            stripe.Subscription.modify(
-                sub.stripe_subscription_id,
-                cancel_at_period_end=True
-            )
-            stripe_cancel_msg = " Stripe subscription will cancel at period end."
-        except Exception as e:
-            # Log error but don't fail the request
-            import logging
-            logging.error(f"Failed to cancel Stripe subscription: {e}")
-            stripe_cancel_msg = " (Note: Stripe cancellation may require manual intervention)"
-    
-    elif sub.stripe_subscription_id and immediate:
-        # Immediately cancel Stripe subscription
-        try:
-            from app.api.v1.routes.payments.stripe_payments import _init_stripe
-            import stripe
-            
-            _init_stripe()
-            stripe.Subscription.cancel(sub.stripe_subscription_id)
-            stripe_cancel_msg = " Stripe subscription cancelled immediately."
-        except Exception as e:
-            import logging
-            logging.error(f"Failed to cancel Stripe subscription immediately: {e}")
-            stripe_cancel_msg = " (Note: Stripe cancellation may require manual intervention)"
+    # 2) Cancel via new service (handles both Stripe and Paystack)
+    service = SubscriptionService()
+    try:
+        await service.cancel_subscription(
+            db=db,
+            user_id=current_user.id,
+            immediate=immediate
+        )
+        provider_msg = " Provider subscription cancelled successfully."
+    except Exception as e:
+        # Log error but don't fail the request
+        import logging
+        logging.error(f"Failed to cancel provider subscription: {e}")
+        provider_msg = " (Note: Provider cancellation may require manual intervention)"
 
     # 3) Perform local cancellation
     if immediate:
         # End the current period now
-        sub.period_end = today
+        sub.period_end = now
         sub.status = SubscriptionStatus.cancelled
         sub.auto_renew = False
         sub.canceled_at = datetime.now(timezone.utc)
@@ -166,15 +152,16 @@ async def cancel_subscription(
                 db, current_user.id, request_refund=True
             )
 
-        msg = "Subscription cancelled immediately and downgraded to Freemium." + refund_msg + stripe_cancel_msg
+        msg = "Subscription cancelled immediately and downgraded to Freemium." + refund_msg + provider_msg
     else:
         # Schedule cancellation at period_end (do NOT downgrade user yet)
-        sub.status = SubscriptionStatus.cancelled
+        # Keep status as "active" - user still has access until period_end
+        # sub.status stays active (don't change it)
         sub.auto_renew = False
         sub.canceled_at = datetime.now(timezone.utc)
         msg = (
             f"Subscription will not renew after {sub.period_end.isoformat()}. "
-            f"You will retain access until then.{stripe_cancel_msg}"
+            f"You will retain access until then.{provider_msg}"
         )
 
     # 4) Persist changes
@@ -199,3 +186,55 @@ async def cancel_subscription(
             "reason": refund_details.reason if refund_details else "",
         }
     return success_response(msg=msg, data=data)
+
+
+@router.get("/manage-payment", status_code=200)
+async def manage_payment(
+    return_url: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get payment management portal URL for user's provider.
+    
+    Returns provider-hosted portal URL:
+    - Stripe: Customer Portal (update card, invoices, billing)
+    - Paystack: Manage subscription link
+    
+    Args:
+        return_url: URL to redirect after portal session (query param)
+        current_user: Authenticated user
+        db: Database session
+    
+    Returns:
+        { portal_url: str }
+    
+    Raises:
+        404: No active subscription found
+        400: Missing provider data or unsupported provider
+    """
+    try:
+        subscription_service = SubscriptionService()
+        portal_url = await subscription_service.get_payment_portal_url(
+            db=db,
+            user_id=current_user.id,
+            return_url=return_url,
+        )
+        
+        return success_response(
+            msg="Payment portal URL generated",
+            data={"portal_url": portal_url}
+        )
+    
+    except ValueError as e:
+        # Handle "No active subscription" or missing provider data
+        if "No active subscription" in str(e):
+            raise HTTPException(status_code=404, detail=str(e))
+        else:
+            raise HTTPException(status_code=400, detail=str(e))
+    
+    except Exception as e:
+        logger.error(f"Failed to get payment portal for user {current_user.id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate payment portal URL"
+        )
