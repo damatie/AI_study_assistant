@@ -21,9 +21,7 @@ from app.models.study_material import StudyMaterial as StudyMaterialModel
 from app.models.assessment_session import AssessmentSession as SessionModel
 from app.models.submission import Submission as SubmissionModel
 from app.api.v1.routes.auth.auth import get_current_user
-from app.services.track_subscription_service.handle_track_subscription import (
-    renew_subscription_for_user,
-)
+from app.services.subscription_access import get_active_subscription
 from app.services.track_usage_service.handle_usage_cycle import get_or_create_usage
 from app.services.ai_service.assessment_service import generate_assessment_questions
 from app.utils.enums import SubscriptionStatus
@@ -79,10 +77,10 @@ async def generate_assessment(
     db: AsyncSession = Depends(get_db),
 ):
     """Generate assessment questions based on study material"""
-    # 1. Ensure subscription is current
-    sub = await renew_subscription_for_user(current_user, db)
-    if sub.status != SubscriptionStatus.active:
-        return error_response("Your subscription is not active", 403)
+    # 1. Check if user has active subscription
+    sub = await get_active_subscription(current_user, db)
+    if not sub:
+        return error_response("No active subscription found. Please subscribe to generate assessments.", 403)
 
     # 2. Load plan & usage
     plan = await db.get(PlanModel, current_user.plan_id)

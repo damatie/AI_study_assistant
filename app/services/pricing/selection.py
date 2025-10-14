@@ -9,10 +9,11 @@ def pick_price_row(
     country_code: str | None = None,
     continent_code: str | None = None,
     resolved_currency: str | None = None,
+    billing_interval: str | None = None,
 ):
-    """Select the best matching price row given region hints.
+    """Select the best matching price row given region hints and billing interval.
 
-    Precedence within the resolved currency:
+    Precedence within the resolved currency and billing interval:
     - country match
     - USD + continent AF match
     - global
@@ -25,6 +26,17 @@ def pick_price_row(
     country_code = (country_code or "").upper()
     continent_code = (continent_code or "").upper()
     resolved_currency = (resolved_currency or "").upper()
+    billing_interval = (billing_interval or "month").lower()
+    
+    # Filter by billing_interval first if specified
+    if billing_interval:
+        rows = [
+            pr for pr in rows 
+            if getattr(pr, "billing_interval", None) and 
+               getattr(getattr(pr, "billing_interval", None), "value", str(pr.billing_interval)).lower() == billing_interval
+        ]
+        if not rows:
+            return None
 
     # country
     if country_code and resolved_currency:

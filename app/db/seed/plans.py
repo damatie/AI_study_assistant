@@ -113,27 +113,27 @@ async def seed_plan_prices():
         if std:
             rows += [
                 # NG → Paystack NGN (country-specific) monthly + annual
-                ensure_price(std, "NGN", PaymentProvider.paystack, 200000, RegionScopeType.country, "NG", BillingInterval.month, "pln_std_ngn_month"),
-                ensure_price(std, "NGN", PaymentProvider.paystack, 2000000, RegionScopeType.country, "NG", BillingInterval.year, "pln_std_ngn_year"),
+                ensure_price(std, "NGN", PaymentProvider.paystack, 200000, RegionScopeType.country, "NG", BillingInterval.month, "PLN_utcjce782gisiks"),  # Real Paystack Plan Code
+                ensure_price(std, "NGN", PaymentProvider.paystack, 2000000, RegionScopeType.country, "NG", BillingInterval.year, "PLN_ey4hyg31c6yicvq"),   # Real Paystack Plan Code
                 # GBP → Stripe global monthly + annual
-                ensure_price(std, "GBP", PaymentProvider.stripe, 499, RegionScopeType.global_scope.value, billing=BillingInterval.month, provider_price_id="price_std_gbp_month"),
-                ensure_price(std, "GBP", PaymentProvider.stripe, 4990, RegionScopeType.global_scope.value, billing=BillingInterval.year, provider_price_id="price_std_gbp_year"),
+                ensure_price(std, "GBP", PaymentProvider.stripe, 499, RegionScopeType.global_scope.value, billing=BillingInterval.month, provider_price_id="price_1SGewR2ffWGtmChhy3nxpLEe"),   # Real Stripe Price ID
+                ensure_price(std, "GBP", PaymentProvider.stripe, 4990, RegionScopeType.global_scope.value, billing=BillingInterval.year, provider_price_id="price_1SGewR2ffWGtmChhHL0CBc9U"),  # Real Stripe Price ID
                 # USD → Stripe global vs Africa tier monthly + annual
-                ensure_price(std, "USD", PaymentProvider.stripe, 699, RegionScopeType.global_scope.value, billing=BillingInterval.month, provider_price_id="price_std_usd_month"),
-                ensure_price(std, "USD", PaymentProvider.stripe, 6990, RegionScopeType.global_scope.value, billing=BillingInterval.year, provider_price_id="price_std_usd_year"),
-                ensure_price(std, "USD", PaymentProvider.stripe, 499, RegionScopeType.continent, "AF", billing=BillingInterval.month, provider_price_id="price_std_usd_af_month"),
-                ensure_price(std, "USD", PaymentProvider.stripe, 4990, RegionScopeType.continent, "AF", billing=BillingInterval.year, provider_price_id="price_std_usd_af_year"),
+                ensure_price(std, "USD", PaymentProvider.stripe, 699, RegionScopeType.global_scope.value, billing=BillingInterval.month, provider_price_id="price_1SGewS2ffWGtmChhXZwaKc19"),  # Real Stripe Price ID
+                ensure_price(std, "USD", PaymentProvider.stripe, 6990, RegionScopeType.global_scope.value, billing=BillingInterval.year, provider_price_id="price_1SGewT2ffWGtmChhK01wOGLf"),  # Real Stripe Price ID
+                ensure_price(std, "USD", PaymentProvider.stripe, 499, RegionScopeType.continent, "AF", billing=BillingInterval.month, provider_price_id="price_1SGewS2ffWGtmChhxGiA1oHw"),  # Real Stripe Price ID
+                ensure_price(std, "USD", PaymentProvider.stripe, 4990, RegionScopeType.continent, "AF", billing=BillingInterval.year, provider_price_id="price_1SGewT2ffWGtmChhtOG8FDzH"),  # Real Stripe Price ID
             ]
         if prem:
             rows += [
-                ensure_price(prem, "NGN", PaymentProvider.paystack, 500000, RegionScopeType.country, "NG", BillingInterval.month, "pln_prem_ngn_month"),
-                ensure_price(prem, "NGN", PaymentProvider.paystack, 5000000, RegionScopeType.country, "NG", BillingInterval.year, "pln_prem_ngn_year"),
-                ensure_price(prem, "GBP", PaymentProvider.stripe, 799, RegionScopeType.global_scope.value, billing=BillingInterval.month, provider_price_id="price_prem_gbp_month"),
-                ensure_price(prem, "GBP", PaymentProvider.stripe, 7990, RegionScopeType.global_scope.value, billing=BillingInterval.year, provider_price_id="price_prem_gbp_year"),
-                ensure_price(prem, "USD", PaymentProvider.stripe, 999, RegionScopeType.global_scope.value, billing=BillingInterval.month, provider_price_id="price_prem_usd_month"),
-                ensure_price(prem, "USD", PaymentProvider.stripe, 9990, RegionScopeType.global_scope.value, billing=BillingInterval.year, provider_price_id="price_prem_usd_year"),
-                ensure_price(prem, "USD", PaymentProvider.stripe, 799, RegionScopeType.continent, "AF", billing=BillingInterval.month, provider_price_id="price_prem_usd_af_month"),
-                ensure_price(prem, "USD", PaymentProvider.stripe, 7990, RegionScopeType.continent, "AF", billing=BillingInterval.year, provider_price_id="price_prem_usd_af_year"),
+                ensure_price(prem, "NGN", PaymentProvider.paystack, 500000, RegionScopeType.country, "NG", BillingInterval.month, "PLN_ddwdcx2mr3ubs2u"),  # Real Paystack Plan Code
+                ensure_price(prem, "NGN", PaymentProvider.paystack, 5000000, RegionScopeType.country, "NG", BillingInterval.year, "PLN_8lbm4pr08m547zd"),   # Real Paystack Plan Code
+                ensure_price(prem, "GBP", PaymentProvider.stripe, 799, RegionScopeType.global_scope.value, billing=BillingInterval.month, provider_price_id="price_1SGewO2ffWGtmChhb2m57hjD"),  # Real Stripe Price ID
+                ensure_price(prem, "GBP", PaymentProvider.stripe, 7990, RegionScopeType.global_scope.value, billing=BillingInterval.year, provider_price_id="price_1SGewO2ffWGtmChhWXsbd5Vh"),  # Real Stripe Price ID
+                ensure_price(prem, "USD", PaymentProvider.stripe, 999, RegionScopeType.global_scope.value, billing=BillingInterval.month, provider_price_id="price_1SGewP2ffWGtmChhZTKsuiKC"),  # Real Stripe Price ID
+                ensure_price(prem, "USD", PaymentProvider.stripe, 9990, RegionScopeType.global_scope.value, billing=BillingInterval.year, provider_price_id="price_1SGewQ2ffWGtmChhwnMqoA3v"),  # Real Stripe Price ID
+                ensure_price(prem, "USD", PaymentProvider.stripe, 799, RegionScopeType.continent, "AF", billing=BillingInterval.month, provider_price_id="price_1SGewP2ffWGtmChh4oLoj57C"),  # Real Stripe Price ID
+                ensure_price(prem, "USD", PaymentProvider.stripe, 7990, RegionScopeType.continent, "AF", billing=BillingInterval.year, provider_price_id="price_1SGewQ2ffWGtmChhR3XXPbmL"),  # Real Stripe Price ID
             ]
 
         # Insert only missing (plan_id, currency, provider, scope_type, scope_value)
@@ -161,8 +161,8 @@ async def seed_plan_prices():
                     if getattr(existing, "price_minor", None) != r.price_minor:
                         existing.price_minor = r.price_minor
                         changed = True
-                    # Update provider_price_id if provided and different
-                    if getattr(r, "provider_price_id", None) and getattr(existing, "provider_price_id", None) != r.provider_price_id:
+                    # Only set provider_price_id if currently NULL (don't overwrite real Stripe IDs)
+                    if getattr(r, "provider_price_id", None) and not getattr(existing, "provider_price_id", None):
                         existing.provider_price_id = r.provider_price_id
                         changed = True
                     if changed:

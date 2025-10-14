@@ -47,3 +47,9 @@ class FlashCardStatus(str, enum.Enum):
 class BillingInterval(str, enum.Enum):
     month = "month"
     year = "year"
+
+
+class TransactionType(str, enum.Enum):
+    initial = "initial"
+    recurring = "recurring"
+    refund = "refund"

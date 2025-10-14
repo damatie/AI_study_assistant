@@ -28,9 +28,7 @@ from app.services.material_processing_service.handle_material_processing import 
 )
 from app.services.material_processing_service.tasks import generate_light_overview, generate_detailed_notes
 from app.utils.processed_payload import get_overview, get_detailed, set_overview_env
-from app.services.track_subscription_service.handle_track_subscription import (
-    renew_subscription_for_user,
-)
+from app.services.subscription_access import get_active_subscription
 from app.services.track_usage_service.handle_usage_cycle import get_or_create_usage
 from app.utils.enums import MaterialStatus, SubscriptionStatus
 
@@ -56,10 +54,10 @@ async def upload_material(
     db: AsyncSession = Depends(get_db),
 ):
     """Upload and start light overview generation (PDF, JPG, JPEG, PNG). Detailed notes are generated on-demand."""
-    # 0) Ensure subscription is active
-    sub = await renew_subscription_for_user(current_user, db)
-    if sub.status != SubscriptionStatus.active:
-        return error_response("Your subscription is not active", 403)
+    # 0) Check if user has active subscription
+    sub = await get_active_subscription(current_user, db)
+    if not sub:
+        return error_response("No active subscription found. Please subscribe to upload materials.", 403)
 
     # 1) Load plan & usage
     plan = await db.get(PlanModel, current_user.plan_id)
