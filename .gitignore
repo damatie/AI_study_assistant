@@ -68,6 +68,9 @@ app/scripts/bootstrap_schema_and_seed.py
 app/scripts/inspect_db.py
 app/db/seed/flash_cards.py
 
+# Ignore production migration and utility scripts
+scripts/
+
 # Ignore docs for production pushes
 docs/
 
