@@ -24,6 +24,7 @@ router = APIRouter()
 # Public/Auth routes (no subscription check needed)
 router.include_router(auth_router)
 router.include_router(ipinfo_router)
+router.include_router(plans_router)  # Plans are public for landing page pricing display
 
 # Webhook routes (no user authentication)
 router.include_router(stripe_webhooks_router)
@@ -37,7 +38,6 @@ protected_router.include_router(materials_router)
 protected_router.include_router(assessments_router)
 protected_router.include_router(tutoring_router)
 protected_router.include_router(flash_cards_router)
-protected_router.include_router(plans_router)
 protected_router.include_router(checkout_router)
 protected_router.include_router(transactions_router)
 
