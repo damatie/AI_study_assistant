@@ -137,6 +137,43 @@ class PaystackClient:
             logger.error(f"Paystack transaction verification error: {e}")
             raise
     
+    async def get_subscription(self, subscription_code: str) -> Dict[str, Any]:
+        """Fetch subscription details from Paystack.
+        
+        Args:
+            subscription_code: Paystack subscription code (e.g., SUB_xxx)
+        
+        Returns:
+            Dictionary with subscription details including next_payment_date
+        
+        Raises:
+            httpx.HTTPStatusError: If Paystack API call fails
+        """
+        url = f"{self.base_url}/subscription/{subscription_code}"
+        headers = {
+            "Authorization": f"Bearer {self.secret_key}",
+            "Content-Type": "application/json",
+        }
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=headers, timeout=30.0)
+                response.raise_for_status()
+                result = response.json()
+            
+            if not result.get("status"):
+                raise ValueError(f"Paystack subscription fetch failed: {result.get('message')}")
+            
+            logger.info(f"Subscription fetched: {subscription_code}")
+            return result["data"]
+            
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Paystack get_subscription failed: {e.response.text}")
+            raise
+        except Exception as e:
+            logger.error(f"Paystack get_subscription error: {e}")
+            raise
+    
     async def disable_subscription(self, subscription_code: str, email_token: Optional[str] = None) -> bool:
         """Disable a Paystack subscription.
         
