@@ -352,35 +352,103 @@ class SubscriptionService:
     async def extend_subscription(
         self,
         db: AsyncSession,
-        subscription_id: uuid.UUID,
+        subscription: Subscription,
     ) -> Subscription:
-        """Extend subscription period after recurring payment.
+        """Extend subscription period after recurring payment using provider dates.
+        
+        IMPORTANT: This method fetches exact dates from provider APIs (Stripe or Paystack).
+        Do NOT calculate dates manually with timedelta!
         
         Args:
             db: Database session
-            subscription_id: Subscription UUID
+            subscription: Subscription object (must have provider subscription ID)
         
         Returns:
             Updated subscription object
         """
-        result = await db.execute(
-            select(Subscription).where(Subscription.id == subscription_id)
-        )
-        subscription = result.scalars().first()
-        if not subscription:
-            raise ValueError(f"Subscription {subscription_id} not found")
-        
-        # Extend period_end based on billing_interval
-        if subscription.billing_interval == BillingInterval.year:
-            subscription.period_end = subscription.period_end + timedelta(days=365)
+        # Route to appropriate provider
+        if subscription.stripe_subscription_id:
+            return await self._extend_stripe_subscription(db, subscription)
+        elif subscription.paystack_subscription_code:
+            return await self._extend_paystack_subscription(db, subscription)
         else:
-            subscription.period_end = subscription.period_end + timedelta(days=30)
+            raise ValueError(f"Subscription {subscription.id} has no provider subscription ID")
+    
+    async def _extend_stripe_subscription(
+        self,
+        db: AsyncSession,
+        subscription: Subscription,
+    ) -> Subscription:
+        """Extend Stripe subscription using Stripe API dates."""
+        import stripe
         
-        db.add(subscription)
-        await db.commit()
-        await db.refresh(subscription)
+        stripe.api_key = settings.STRIPE_SECRET_KEY
         
-        logger.info(f"Subscription extended: id={subscription.id}, new_period_end={subscription.period_end}")
+        try:
+            # Fetch exact dates from Stripe API (source of truth)
+            stripe_subscription = stripe.Subscription.retrieve(subscription.stripe_subscription_id)
+            first_item = stripe_subscription['items']['data'][0]
+            period_start_unix = first_item['current_period_start']
+            period_end_unix = first_item['current_period_end']
+            
+            # Convert to datetime
+            period_start_dt = datetime.fromtimestamp(period_start_unix, tz=timezone.utc)
+            period_end_dt = datetime.fromtimestamp(period_end_unix, tz=timezone.utc)
+            
+            # Update subscription with exact provider dates
+            subscription.period_start = period_start_dt
+            subscription.period_end = period_end_dt
+            
+            db.add(subscription)
+            await db.commit()
+            await db.refresh(subscription)
+            
+            logger.info(f"✅ Stripe subscription extended: id={subscription.id}, period_start={period_start_dt.isoformat()}, period_end={period_end_dt.isoformat()}")
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch Stripe subscription dates for {subscription.id}: {e}")
+            raise
+        
+        return subscription
+    
+    async def _extend_paystack_subscription(
+        self,
+        db: AsyncSession,
+        subscription: Subscription,
+    ) -> Subscription:
+        """Extend Paystack subscription using Paystack API dates."""
+        try:
+            # Fetch exact dates from Paystack API (source of truth)
+            paystack_subscription = await self.paystack_client.get_subscription(
+                subscription.paystack_subscription_code
+            )
+            
+            # Extract dates from Paystack response
+            # createdAt format: "2024-10-13T00:00:00.000Z"
+            # next_payment_date format: "2024-11-13T00:00:00.000Z"
+            created_at_str = paystack_subscription.get("createdAt")
+            next_payment_date_str = paystack_subscription.get("next_payment_date")
+            
+            if not created_at_str or not next_payment_date_str:
+                raise ValueError(f"Missing dates in Paystack response: createdAt={created_at_str}, next_payment_date={next_payment_date_str}")
+            
+            # Parse dates
+            period_start_dt = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+            period_end_dt = datetime.fromisoformat(next_payment_date_str.replace('Z', '+00:00'))
+            
+            # Update subscription with exact provider dates
+            subscription.period_start = period_start_dt
+            subscription.period_end = period_end_dt
+            
+            db.add(subscription)
+            await db.commit()
+            await db.refresh(subscription)
+            
+            logger.info(f"✅ Paystack subscription extended: id={subscription.id}, period_start={period_start_dt.isoformat()}, period_end={period_end_dt.isoformat()}")
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch Paystack subscription dates for {subscription.id}: {e}")
+            raise
         
         return subscription
     

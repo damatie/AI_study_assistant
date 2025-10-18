@@ -216,21 +216,27 @@ async def _handle_charge_success(event, db: AsyncSession, service: SubscriptionS
     txn.status_message = "Payment completed successfully"
     txn.channel = data.get("channel")  # card, bank, bank_transfer, etc.
     
-    # Check if subscription exists and was in retry period (successful retry)
+    # Check if subscription exists (either initial payment or renewal)
     if txn.subscription_id:
         from app.models.subscription import Subscription
         sub_result = await db.execute(select(Subscription).where(Subscription.id == txn.subscription_id))
         sub = sub_result.scalar_one_or_none()
         
-        if sub and sub.is_in_retry_period:
-            sub.is_in_retry_period = False
-            sub.retry_attempt_count = 0
-            sub.last_payment_failure_at = None
-            db.add(sub)
-            logger.info(f"✅ Subscription {sub.id} payment succeeded on retry - resuming normal billing")
+        if sub:
+            # Handle successful retry
+            if sub.is_in_retry_period:
+                sub.is_in_retry_period = False
+                sub.retry_attempt_count = 0
+                sub.last_payment_failure_at = None
+                db.add(sub)
+                logger.info(f"✅ Subscription {sub.id} payment succeeded on retry - resuming normal billing")
+            
+            # Extend subscription for renewals (fetch updated dates from Paystack)
+            await service.extend_subscription(db, sub)
+            logger.info(f"✅ Subscription {sub.id} extended (recurring payment)")
     
     await db.commit()
-    logger.info(f"✅ Transaction {reference} marked as successful via {txn.channel}. Waiting for subscription.create webhook...")
+    logger.info(f"✅ Transaction {reference} marked as successful via {txn.channel}")
 
 
 async def _handle_charge_failed(event, db: AsyncSession, service: SubscriptionService):
