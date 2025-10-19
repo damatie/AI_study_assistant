@@ -26,9 +26,11 @@ def _ev(v):
 async def list_transactions(
     current_user = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    include_inactive: bool = Query(False, description="Include expired/canceled attempts"),
 ):
-    """List the current user's transactions (most recent first by effective date)."""
+    """List the current user's completed transactions (success, failed, refunded).
+    
+    Excludes abandoned/incomplete transactions following industry best practice.
+    """
     # Order by the same logic as `display_at` to keep UI consistent:
     # success -> updated_at; otherwise -> created_at
     effective_ts = case(
@@ -36,9 +38,12 @@ async def list_transactions(
         else_=Transaction.created_at,
     )
     stmt = select(Transaction).where(Transaction.user_id == current_user.id)
-    if not include_inactive:
-        stmt = stmt.where(Transaction.status != TransactionStatus.expired)
-        stmt = stmt.where(Transaction.status != TransactionStatus.canceled)
+    
+    # Industry best practice: Only show completed payment attempts (success, failed, refunded)
+    # Hide abandoned/incomplete transactions (pending, expired, canceled)
+    stmt = stmt.where(Transaction.status != TransactionStatus.pending)
+    stmt = stmt.where(Transaction.status != TransactionStatus.expired)
+    stmt = stmt.where(Transaction.status != TransactionStatus.canceled)
     result = await db.execute(stmt.order_by(effective_ts.desc()))
     rows = result.scalars().all()
 
@@ -60,6 +65,7 @@ async def list_transactions(
                 "status_message": getattr(tx, 'status_message', None),
                 "reference": tx.reference,
                 "authorization_url": tx.authorization_url,
+                "transaction_type": _ev(tx.transaction_type) if getattr(tx, 'transaction_type', None) else "initial",
                 "created_at": created,
                 "updated_at": updated,
                 "expires_at": tx.expires_at.isoformat() if getattr(tx, 'expires_at', None) else None,
@@ -90,10 +96,9 @@ async def get_invoice_link(
     if tx.provider == PaymentProvider.stripe:
         # Stripe: retrieve session, expand invoice/payment_intent
         try:
-            from app.api.v1.routes.payments.stripe_payments import _init_stripe  # lazy import
             import stripe
+            stripe.api_key = settings.STRIPE_SECRET_KEY
 
-            _init_stripe()
             session = stripe.checkout.Session.retrieve(
                 tx.reference,
                 expand=["invoice", "payment_intent.latest_charge"],

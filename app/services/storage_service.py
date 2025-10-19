@@ -34,6 +34,9 @@ class StorageBackend(Protocol):
     async def get_bytes(self, *, key: str) -> bytes:
         """Retrieve raw bytes for a previously stored object key."""
         ...
+    async def delete_object(self, *, key: str) -> bool:
+        """Delete object from storage. Returns True if deleted, False if not found."""
+        ...
 
 @dataclass
 class LocalStorageBackend:
@@ -58,6 +61,16 @@ class LocalStorageBackend:
         path = os.path.join(self.base_path, key)
         with open(path, 'rb') as f:
             return f.read()
+
+    async def delete_object(self, *, key: str) -> bool:
+        """Delete file from local storage. Returns True if deleted, False if not found."""
+        path = os.path.join(self.base_path, key)
+        if os.path.exists(path):
+            os.remove(path)
+            logger.info(f"Deleted local file: {path}")
+            return True
+        logger.warning(f"Local file not found for deletion: {path}")
+        return False
 
 @dataclass
 class S3StorageBackend:
@@ -123,6 +136,25 @@ class S3StorageBackend:
         obj = self.client.get_object(Bucket=self.bucket, Key=key)
         return obj['Body'].read()
 
+    async def delete_object(self, *, key: str) -> bool:
+        """Delete object from S3/R2. Returns True if deleted, False if not found."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._delete_sync, key)
+
+    def _delete_sync(self, key: str) -> bool:
+        """Synchronous delete helper for executor."""
+        try:
+            self.client.delete_object(Bucket=self.bucket, Key=key)
+            logger.info(f"Deleted S3 object: {key}")
+            return True
+        except self.client.exceptions.NoSuchKey:
+            logger.warning(f"S3 object not found for deletion: {key}")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to delete S3 object {key}: {e}")
+            raise
+
 _backend: StorageBackend | None = None
 
 def reset_storage_backend():
@@ -175,3 +207,7 @@ async def generate_access_url(*, key: str) -> Optional[str]:
     if url:
         return url
     return backend.public_url(key=key)
+
+async def delete_bytes(*, key: str) -> bool:
+    """Delete object from storage backend. Returns True if deleted, False if not found."""
+    return await get_storage_backend().delete_object(key=key)

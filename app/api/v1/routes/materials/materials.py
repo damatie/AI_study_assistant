@@ -20,7 +20,7 @@ from app.models.study_material import StudyMaterial as StudyMaterialModel
 from app.models.assessment_session import AssessmentSession as SessionModel
 from app.models.submission import Submission as SubmissionModel
 from app.api.v1.routes.auth.auth import get_current_user
-from app.services.storage_service import store_bytes, generate_access_url
+from app.services.storage_service import store_bytes, generate_access_url, delete_bytes
 from app.services.material_processing_service.handle_material_processing import (
     get_pdf_page_count_from_bytes,
     process_pdf_via_gemini,
@@ -28,9 +28,7 @@ from app.services.material_processing_service.handle_material_processing import 
 )
 from app.services.material_processing_service.tasks import generate_light_overview, generate_detailed_notes
 from app.utils.processed_payload import get_overview, get_detailed, set_overview_env
-from app.services.track_subscription_service.handle_track_subscription import (
-    renew_subscription_for_user,
-)
+from app.services.subscription_access import get_active_subscription
 from app.services.track_usage_service.handle_usage_cycle import get_or_create_usage
 from app.utils.enums import MaterialStatus, SubscriptionStatus
 
@@ -56,10 +54,10 @@ async def upload_material(
     db: AsyncSession = Depends(get_db),
 ):
     """Upload and start light overview generation (PDF, JPG, JPEG, PNG). Detailed notes are generated on-demand."""
-    # 0) Ensure subscription is active
-    sub = await renew_subscription_for_user(current_user, db)
-    if sub.status != SubscriptionStatus.active:
-        return error_response("Your subscription is not active", 403)
+    # 0) Check if user has active subscription
+    sub = await get_active_subscription(current_user, db)
+    if not sub:
+        return error_response("No active subscription found. Please subscribe to upload materials.", 403)
 
     # 1) Load plan & usage
     plan = await db.get(PlanModel, current_user.plan_id)
@@ -439,7 +437,21 @@ async def delete_material(
         logger.warning(f"Delete denied: User {current_user.id} tried to delete material {material_id} owned by {mat.user_id}")
         return error_response("Access denied: You don't own this material", status_code=status.HTTP_403_FORBIDDEN)
 
-    # 2. Delete any related submissions/sessions? 
+    # 2. Delete the file from storage (S3/R2) before deleting DB records
+    if mat.file_path:
+        try:
+            deleted = await delete_bytes(key=mat.file_path)
+            if deleted:
+                logger.info(f"Successfully deleted storage file: {mat.file_path}")
+            else:
+                logger.warning(f"Storage file not found (may have been already deleted): {mat.file_path}")
+        except Exception as e:
+            logger.error(f"Failed to delete storage file {mat.file_path}: {e}")
+            # Continue with DB deletion anyway - don't let storage errors block user action
+    else:
+        logger.warning(f"Material {material_id} has no file_path - skipping storage cleanup")
+
+    # 3. Delete any related submissions/sessions? 
     #    (If you have a FK ON DELETE CASCADE you can skip these)
     # For example, to delete sessions & submissions tied to this material:
     
@@ -454,7 +466,7 @@ async def delete_material(
         .where(SessionModel.material_id == material_id)
     )
 
-    # 3. Delete the material
+    # 4. Delete the material from database
     await db.execute(
         delete(StudyMaterialModel).where(StudyMaterialModel.id == material_id)
     )
