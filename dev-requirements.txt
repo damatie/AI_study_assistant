@@ -1,0 +1,20 @@
+# Development Tools
+# These packages are only needed for development, not production
+
+# Code Formatting and Linting
+black==25.1.0
+pathspec==0.12.1
+click==8.2.1
+platformdirs==4.3.7
+
+# Type Checking
+mypy-extensions==1.1.0
+
+# Testing
+pytest==8.4.1
+pytest-cov==6.2.1
+pytest-mock==3.14.1
+
+# Development Utilities
+# pre-commit>=3.0.0
+# flake8>=6.0.0

@@ -14,5 +14,7 @@ class UsageTracking(Base):
     uploads_count = Column(Integer, default=0, nullable=False)
     assessments_count = Column(Integer, default=0, nullable=False)
     asked_questions_count = Column(Integer, default=0, nullable=False)
+    # New: number of flash-card sets created in this billing period
+    flash_card_sets_count = Column(Integer, default=0, nullable=False)
 
     user = relationship("User", back_populates="usage_tracking")
