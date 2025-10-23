@@ -1,6 +1,5 @@
 import logging
 from contextlib import redirect_stdout, redirect_stderr
-from io import StringIO
 from typing import Optional
 
 from sqlalchemy import update

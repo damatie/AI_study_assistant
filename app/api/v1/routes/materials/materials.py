@@ -82,7 +82,6 @@ async def upload_material(
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
-    tmp_path = None
     try:
         # 2) Read upload bytes and push to storage backend
         content_bytes = await file.read()
@@ -135,40 +134,9 @@ async def upload_material(
         db.add(usage)
         await db.commit()
 
-        # 6) Synchronously generate light overview and update DB
-        try:
-            # Write uploaded bytes to a temp file for the processor
-            with open(os.path.join(os.getenv("TMP", os.getenv("TEMP", ".")), f"upload_{material_uuid}{file_ext}"), "wb") as fp:
-                fp.write(content_bytes)
-                tmp_path = fp.name
-
-            md = "# Overview Processing Failed\n\nUnsupported file type."
-            new_page_count = page_count
-
-            if (file.content_type == "application/pdf") or (file_ext.lower() == ".pdf"):
-                _, md, new_page_count = await process_pdf_via_gemini(tmp_path, mode="overview")
-            elif file_ext.lower() in (".png", ".jpg", ".jpeg"):
-                _, md = await process_image_via_gemini(tmp_path, mode="overview")
-            else:
-                md = "# Overview Processing Failed\n\nUnsupported file type."
-
-            # Update envelope and status
-            updated_payload = set_overview_env(mat.processed_content, md)
-            mat.processed_content = updated_payload
-            # Prefer new_page_count if returned
-            mat.page_count = new_page_count or mat.page_count
-            # Mark as completed on success, else failed
-            mat.status = MaterialStatus.completed if not md.startswith("# Overview Processing Failed") else MaterialStatus.failed
-
-            db.add(mat)
-            await db.commit()
-            await db.refresh(mat)
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.unlink(tmp_path)
-                except Exception:
-                    pass
+        # 6) Queue background task for overview generation (non-blocking)
+        asyncio.create_task(generate_light_overview(str(material_id)))
+        logger.info(f"Queued background overview generation for material {material_id}")
 
         return success_response(
             msg="Material uploaded.",
@@ -177,13 +145,9 @@ async def upload_material(
         )
 
     except HTTPException:
-        if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
         raise
     except Exception as e:
         logger.exception(f"Failed to upload material: {e}")
-        if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 
@@ -280,6 +244,7 @@ async def get_material(
             env_overview = get_overview(mat.processed_content)
             env_detailed = get_detailed(mat.processed_content)
             # Do NOT derive idle here so the client can reflect processing during detailed generation
+            # Auto-recovery: If overview hasn't generated after 20s, requeue it
             if (
                 data["status"] == "processing"
                 and not env_overview
