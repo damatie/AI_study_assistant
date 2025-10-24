@@ -12,16 +12,19 @@ import enum as _enum
 from app.utils.enums import PaymentProvider
 
 # A list of Plan instances ready to be bulk‑inserted
+# NOTE: These values match the frontend marketing copy in exportData.tsx
 default_plans = [
     Plan(
         id=uuid.uuid4(),
         name="Freemium",
         sku="FREEMIUM",
-        monthly_upload_limit=3,
-        pages_per_upload_limit=5,
-        monthly_assessment_limit=5,
-        questions_per_assessment=5,
-        monthly_ask_question_limit=30,
+        monthly_upload_limit=15,        # Frontend: 15 uploads/month
+        pages_per_upload_limit=100,     # Frontend: 100 pages per upload
+        monthly_assessment_limit=15,    # Frontend: 15 assessments/month
+        questions_per_assessment=10,    # Frontend: 10 questions per assessment
+        monthly_ask_question_limit=100, # Frontend: 100 AI questions/month
+        monthly_flash_cards_limit=10,   # Frontend: 10 flash card sets/month
+        max_cards_per_deck=15,          # Frontend: 15 cards per deck
         summary_detail=SummaryDetail.limited_detail,
         ai_feedback_level=AIFeedbackLevel.basic,
     ),
@@ -29,11 +32,13 @@ default_plans = [
         id=uuid.uuid4(),
         name="Standard",
         sku="STANDARD",
-        monthly_upload_limit=15,
-        pages_per_upload_limit=15,
-        monthly_assessment_limit=999999,
-        questions_per_assessment=20,
-        monthly_ask_question_limit=100,
+        monthly_upload_limit=40,        # Frontend: 40 uploads/month
+        pages_per_upload_limit=200,     # Frontend: 200 pages per upload
+        monthly_assessment_limit=50,    # Frontend: 50 assessments/month
+        questions_per_assessment=30,    # Frontend: 30 questions per assessment
+        monthly_ask_question_limit=400, # Frontend: 400 AI questions/month
+        monthly_flash_cards_limit=30,   # Frontend: 30 flash card sets/month
+        max_cards_per_deck=50,          # Frontend: 50 cards per deck
         summary_detail=SummaryDetail.deep_insights,
         ai_feedback_level=AIFeedbackLevel.concise,
     ),
@@ -41,11 +46,13 @@ default_plans = [
         id=uuid.uuid4(),
         name="Premium",
         sku="PREMIUM",
-        monthly_upload_limit=999999,
-        pages_per_upload_limit=999999,
-        monthly_assessment_limit=999999,
-        questions_per_assessment=50,
-        monthly_ask_question_limit=999999,
+        monthly_upload_limit=200,       # Frontend: 200 uploads/month
+        pages_per_upload_limit=999999,  # Frontend: Unlimited pages
+        monthly_assessment_limit=999999,# Frontend: Unlimited assessments
+        questions_per_assessment=75,    # Frontend: 75 questions per assessment
+        monthly_ask_question_limit=999999, # Frontend: Unlimited AI questions
+        monthly_flash_cards_limit=999999,  # Frontend: Unlimited flash card sets
+        max_cards_per_deck=100,         # Frontend: 100 cards per deck
         summary_detail=SummaryDetail.deep_insights,
         ai_feedback_level=AIFeedbackLevel.full_in_depth,
     ),
@@ -192,11 +199,12 @@ async def ensure_flashcard_limits():
     """Fill in monthly_flash_cards_limit and max_cards_per_deck for known SKUs if zero.
 
     Idempotent: Only updates rows where these values are 0 or NULL.
+    NOTE: These values now match the frontend marketing copy in exportData.tsx
     """
     targets = {
-        "FREEMIUM": {"monthly_flash_cards_limit": 3, "max_cards_per_deck": 25},
-        "STANDARD": {"monthly_flash_cards_limit": 15, "max_cards_per_deck": 40},
-        "PREMIUM":  {"monthly_flash_cards_limit": 50, "max_cards_per_deck": 80},
+        "FREEMIUM": {"monthly_flash_cards_limit": 10, "max_cards_per_deck": 15},
+        "STANDARD": {"monthly_flash_cards_limit": 30, "max_cards_per_deck": 50},
+        "PREMIUM":  {"monthly_flash_cards_limit": 999999, "max_cards_per_deck": 100},
     }
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(Plan))
