@@ -14,16 +14,12 @@ from app.models.flash_card_set import FlashCardSet
 from app.models.study_material import StudyMaterial
 from app.models.plan import Plan as PlanModel
 from app.services.track_usage_service.handle_usage_cycle import get_or_create_usage
-from app.schemas.flash_cards import (
-    FlashCardSetCreate,
-    FlashCardGenerateRequest,
-)
+from app.schemas.flash_cards import FlashCardGenerateRequest, FlashCardSetCreate
 from app.utils.enums import FlashCardStatus
-from app.utils.processed_payload import get_detailed, get_overview
-from app.services.material_processing_service.markdown_parser import (
-    clean_markdown_for_context,
+from app.services.material_processing_service.gemini_helpers import (
+    get_gemini_file_reference_for_material,
 )
-from app.services.flash_cards.generator import generate_flash_cards_from_context
+from app.services.flash_cards.generator import generate_flash_cards_from_file
 
 
 logger = logging.getLogger(__name__)
@@ -299,21 +295,21 @@ async def _bg_generate_flash_cards(*, set_id: uuid.UUID, user_id: uuid.UUID, bod
     """Background job to generate flash cards and update DB status."""
     async with AsyncSessionLocal() as session:
         try:
-            # Load context if material provided
-            context = ""
+            # Load material
             material_title = None
+            gemini_file = None
+            
             if body.material_id:
                 material = await session.get(StudyMaterial, body.material_id)
                 if material and material.user_id == user_id:
                     material_title = material.title
-                    detailed_md = get_detailed(material.processed_content)
-                    overview_md = get_overview(material.processed_content)
-                    raw_md = detailed_md or overview_md or material.content or ""
-                    context = clean_markdown_for_context(raw_md)
+                    # Fetch or refresh Gemini Files API URI for this material
+                    gemini_file = await get_gemini_file_reference_for_material(material, session)
 
-            gen = await generate_flash_cards_from_context(
+            # Generate using Files API
+            gen = await generate_flash_cards_from_file(
                 material_title=body.title or material_title,
-                cleaned_markdown_context=context,
+                gemini_file=gemini_file,
                 difficulty=body.difficulty,
                 num_cards=body.num_cards,
                 topic=body.topic,

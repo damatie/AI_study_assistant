@@ -1,9 +1,13 @@
 # Standard library imports
 import logging
-from typing import Literal
+from typing import Literal, Optional
 
 # Local imports
 from app.core.genai_client import get_gemini_model
+from app.services.material_processing_service.gemini_files import (
+    GeminiFileMetadata,
+    generate_from_gemini_file,
+)
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -12,12 +16,17 @@ logger = logging.getLogger(__name__)
 model = get_gemini_model()
 
 
-async def chat_with_ai(question: str, context: str, tone: Literal['academic','conversational'] = 'academic') -> dict:
+async def answer_with_file(
+    question: str,
+    tone: Literal['academic','conversational'] = 'academic',
+    gemini_file: Optional[GeminiFileMetadata] = None,
+) -> dict:
     """Answer a question with markdown response and proper mathematical formatting
     
     Args:
         question: The student's question
-        context: Study material context for the question
+        tone: Response tone (academic or conversational)
+        gemini_file_uri: Optional Gemini file URI reference (None for questions without material)
         
     Returns:
         dict: Response containing the AI tutor's markdown answer
@@ -196,9 +205,6 @@ async def chat_with_ai(question: str, context: str, tone: Literal['academic','co
     ✅ Search queries that lead directly to the resource
     ✅ Brief description of what they'll find at each source
 
-    CONTEXT (source excerpts):
-    {context}
-    
     QUESTION:
     {question}
     
@@ -206,17 +212,28 @@ async def chat_with_ai(question: str, context: str, tone: Literal['academic','co
     """
 
     try:
-        # Use standard generation (no streaming)
-        response = await model.generate_content_async(prompt)
-        text = response.text or ""
+        if gemini_file:
+            # Generate using Files API with PDF context
+            response_text = await generate_from_gemini_file(
+                file_uri=gemini_file.uri,
+                prompt=prompt,
+                mime_type=gemini_file.mime_type or "application/pdf",
+            )
+            text = response_text or ""
+        else:
+            # Generate without file context (for questions without material)
+            response = await model.generate_content_async(prompt)
+            text = response.text or ""
+        
         # Post-guard: strip accidental greetings at the start for academic tone only
         if tone == 'academic':
             import re
             text = re.sub(r'^(\s*)(Hey there!|Hey!|Hi there!|Hi!|Hello there!|Hello!|Welcome[.!]?|Thanks for your question[.!]?)[\s,:-]*', r'\1', text, flags=re.IGNORECASE)
+        
         return {"answer": text}
 
     except Exception as e:
-        logger.error(f"Error in chat_with_ai: {str(e)}")
+        logger.error(f"Error in answer_with_file: {str(e)}")
         # Provide a fallback markdown response
         fallback_answer = f"""# Technical Difficulty
 
@@ -226,9 +243,7 @@ I apologize, but I'm experiencing technical difficulties at the moment.
 {question}
 
 ## What I Can Tell You
-Based on the available context:
-
-{context[:500] + "..." if len(context) > 500 else context}
+I'm here to help answer your question based on your study material.
 
 ## Next Steps
 Please try asking your question again in a few moments. If the problem persists, you may want to:
