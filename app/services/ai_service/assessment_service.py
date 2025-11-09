@@ -2,7 +2,13 @@
 
 import json
 import logging
+from typing import Optional
+
 from app.core.genai_client import get_gemini_model
+from app.services.material_processing_service.gemini_files import (
+        GeminiFileMetadata,
+        generate_from_gemini_file,
+)
 
 logger = logging.getLogger(__name__)
 model = get_gemini_model()
@@ -27,10 +33,11 @@ OUTPUT HYGIENE:
 
 
 async def generate_assessment_questions(
-                text: str,
-                operation_type: str,
-                num_questions: int = 5,
-                difficulty: str = "medium",
+        text: str,
+        operation_type: str,
+        num_questions: int = 5,
+        difficulty: str = "medium",
+        gemini_file: Optional[GeminiFileMetadata] = None,
 ) -> dict:
                 """Generate assessment questions using Gemini LLM based on operation type."""
 
@@ -104,8 +111,17 @@ async def generate_assessment_questions(
                         # Flash cards are no longer supported here; use Flash Cards API instead.
                         raise ValueError(f"Invalid operation type for assessments: {operation_type}")
 
+                response_text = ""
                 try:
-                        response = await model.generate_content_async(prompts[operation_type])
+                        if gemini_file:
+                                response_text = await generate_from_gemini_file(
+                                        file_uri=gemini_file.uri,
+                                        prompt=prompts[operation_type],
+                                        mime_type=gemini_file.mime_type or "application/pdf",
+                                )
+                        else:
+                                response = await model.generate_content_async(prompts[operation_type])
+                                response_text = response.text
                 except Exception as e:
                         logger.error(f"Error calling Gemini API in generate_assessment_questions: {str(e)}")
                         base_q = {"question": "Based on the study material, explain the key concepts."}
@@ -120,7 +136,6 @@ async def generate_assessment_questions(
                         return {"questions": [base_q for _ in range(min(num_questions, 3))]}
 
                 try:
-                        response_text = response.text
                         json_str = response_text
                         if "```json" in response_text:
                                 json_str = response_text.split("```json")[1].split("```")[0].strip()
@@ -135,10 +150,10 @@ async def generate_assessment_questions(
                         return result
                 except json.JSONDecodeError as e:
                         logger.error(f"JSON decode error: {e}")
-                        logger.error(f"Response was: {response.text}")
+                        logger.error(f"Response was: {response_text}")
                         raise Exception(f"Failed to parse JSON from LLM response: {e}")
                 except Exception as e:
                         logger.error(f"Error processing response: {e}")
-                        logger.error(f"Response was: {response.text}")
+                        logger.error(f"Response was: {response_text}")
                         raise Exception(f"Failed to process LLM response: {e}")
         

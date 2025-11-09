@@ -24,6 +24,9 @@ from app.api.v1.routes.auth.auth import get_current_user
 from app.services.subscription_access import get_active_subscription
 from app.services.track_usage_service.handle_usage_cycle import get_or_create_usage
 from app.services.ai_service.assessment_service import generate_assessment_questions
+from app.services.material_processing_service.gemini_helpers import (
+    get_gemini_file_reference_for_material,
+)
 from app.utils.enums import SubscriptionStatus
 from app.core.config import settings
 
@@ -67,6 +70,7 @@ class GradeAssessment(BaseModel):
 class BulkGradeAssessment(BaseModel):
     session_id: uuid.UUID
     answers: List[GradeAssessment]
+    
 
 
 # Generate assessments
@@ -123,38 +127,47 @@ async def generate_assessment(
             limit=plan.questions_per_assessment,
         )
 
-    # 7. Build content
-    # Prefer processed markdown envelope (detailed → overview), falling back to raw content
-    from app.utils.processed_payload import get_detailed, get_overview
-    detailed = get_detailed(mat.processed_content)
-    overview = None if detailed else get_overview(mat.processed_content)
-    base_md = detailed or overview or (mat.content or "")
-    source_label = "processed.detailed" if detailed else ("processed.overview" if overview else "raw")
+    # 7. Retrieve Gemini file reference or fall back to markdown context
+    gemini_file = await get_gemini_file_reference_for_material(mat, db)
+    if gemini_file:
+        content = "Use the attached study material for all context."  # Preserve prompt structure
+        logger.debug(
+            "assessment_content_source=gemini_file user_id=%s material_id=%s",
+            str(current_user.id),
+            str(mat.id),
+        )
+    else:
+        # Prefer processed markdown envelope (detailed → overview), falling back to raw content
+        from app.utils.processed_payload import get_detailed, get_overview
+        detailed = get_detailed(mat.processed_content)
+        overview = None if detailed else get_overview(mat.processed_content)
+        base_md = detailed or overview or (mat.content or "")
+        source_label = "processed.detailed" if detailed else ("processed.overview" if overview else "raw")
 
-    # Clean and truncate for AI consumption to keep latency and cost predictable
-    from app.services.material_processing_service.markdown_parser import (
-        clean_markdown_for_context,
-        smart_truncate_markdown,
-    )
-    pre_len = len(base_md or "")
-    content = clean_markdown_for_context(base_md)
-    cleaned_len = len(content)
-    # Scale budget with requested number of questions (approx 4k chars per Q), capped for safety
-    budget = min(4000 * num, 60000)
-    content = smart_truncate_markdown(content, budget_chars=budget)
-    final_len = len(content)
+        # Clean and truncate for AI consumption to keep latency and cost predictable
+        from app.services.material_processing_service.markdown_parser import (
+            clean_markdown_for_context,
+            smart_truncate_markdown,
+        )
+        pre_len = len(base_md or "")
+        content = clean_markdown_for_context(base_md)
+        cleaned_len = len(content)
+        # Scale budget with requested number of questions (approx 4k chars per Q), capped for safety
+        budget = min(4000 * num, 60000)
+        content = smart_truncate_markdown(content, budget_chars=budget)
+        final_len = len(content)
 
-    # Observability: log selection and sizes (debug level)
-    logger.debug(
-        "assessment_content_source=%s pre_len=%d cleaned_len=%d final_len=%d budget=%d user_id=%s material_id=%s",
-        source_label,
-        pre_len,
-        cleaned_len,
-        final_len,
-        budget,
-        str(current_user.id),
-        str(mat.id),
-    )
+        # Observability: log selection and sizes (debug level)
+        logger.debug(
+            "assessment_content_source=%s pre_len=%d cleaned_len=%d final_len=%d budget=%d user_id=%s material_id=%s",
+            source_label,
+            pre_len,
+            cleaned_len,
+            final_len,
+            budget,
+            str(current_user.id),
+            str(mat.id),
+        )
 
     # 8. LLM generate each type
     payload = {}
@@ -164,7 +177,13 @@ async def generate_assessment(
 
     if "short_answer" in selected_types:
         # Short answer questions don't mix either, use all questions for them
-        r = await generate_assessment_questions(content, "generate_sa", num_questions=num, difficulty=assessment_data.difficulty)
+        r = await generate_assessment_questions(
+            content,
+            "generate_sa",
+            num_questions=num,
+            difficulty=assessment_data.difficulty,
+            gemini_file=gemini_file,
+        )
         payload["short_answer"] = r["questions"]
     else:
         # For multiple question types, distribute questions
@@ -187,7 +206,11 @@ async def generate_assessment(
             mc_count = question_distribution["multiple_choice"]
             if mc_count > 0:
                 r = await generate_assessment_questions(
-                    content, "generate_mc", num_questions=mc_count, difficulty=assessment_data.difficulty
+                    content,
+                    "generate_mc",
+                    num_questions=mc_count,
+                    difficulty=assessment_data.difficulty,
+                    gemini_file=gemini_file,
                 )
                 payload["multiple_choice"] = r["questions"]
 
@@ -195,7 +218,11 @@ async def generate_assessment(
             tf_count = question_distribution["true_false"]
             if tf_count > 0:
                 r = await generate_assessment_questions(
-                    content, "generate_tf", num_questions=tf_count, difficulty=assessment_data.difficulty
+                    content,
+                    "generate_tf",
+                    num_questions=tf_count,
+                    difficulty=assessment_data.difficulty,
+                    gemini_file=gemini_file,
                 )
                 payload["true_false"] = r["questions"]
 
