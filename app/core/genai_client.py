@@ -12,16 +12,27 @@ logger = logging.getLogger(__name__)
 # Initialize Gemini API
 genai.configure(api_key=settings.GOOGLE_API_KEY)
 
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+
+DEFAULT_MULTIMODAL_GENERATION_CONFIG: Dict[str, Any] = {
+    "temperature": 0.65,
+    "top_p": 0.85,
+    "top_k": 40,
+    "max_output_tokens": 16384,
+}
+
+FALLBACK_TEXT_GENERATION_CONFIG: Dict[str, Any] = {
+    "temperature": 0.6,
+    "top_p": 0.85,
+    "top_k": 40,
+    "max_output_tokens": 16384,
+}
+
 class GeminiClientWithRetry:
     """Enhanced Gemini client with retry logic and error handling."""
     
     # Default configurations
-    DEFAULT_GENERATION_CONFIG = {
-        "temperature": 0.7,
-        "top_p": 0.8,
-        "top_k": 40,
-        "max_output_tokens": 8192,
-    }
+    DEFAULT_GENERATION_CONFIG = DEFAULT_MULTIMODAL_GENERATION_CONFIG.copy()
     
     DEFAULT_SAFETY_SETTINGS = [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -30,7 +41,7 @@ class GeminiClientWithRetry:
         {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
     ]
     
-    def __init__(self, model_name: str = "gemini-2.5-flash"):
+    def __init__(self, model_name: str = DEFAULT_GEMINI_MODEL):
         self.model_name = model_name
         self.model = genai.GenerativeModel(model_name)
         self.max_retries = 3
@@ -158,13 +169,8 @@ _gemini_client: Optional[GeminiClientWithRetry] = None
 
 
 def get_gemini_model() -> GeminiClientWithRetry:
-    """Get the enhanced Gemini client instance (singleton pattern)."""
+    """Return the shared Gemini client with retry/backoff handling."""
     global _gemini_client
     if _gemini_client is None:
         _gemini_client = GeminiClientWithRetry()
     return _gemini_client
-
-
-def get_gemini_model_legacy() -> genai.GenerativeModel:
-    """Legacy function that returns the basic model (for backward compatibility)."""
-    return genai.GenerativeModel("gemini-2.0-flash-exp")

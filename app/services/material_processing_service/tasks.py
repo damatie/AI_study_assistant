@@ -8,10 +8,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.deps import AsyncSessionLocal
 from app.models.study_material import StudyMaterial as StudyMaterialModel
 from app.utils.enums import MaterialStatus
-from app.utils.processed_payload import set_overview_env, set_detailed_env
+from app.utils.processed_payload import set_overview_env, set_detailed_env, set_suggestions_env
 from app.services.material_processing_service.handle_material_processing import (
     process_pdf_via_gemini,
     process_image_via_gemini,
+)
+from app.services.material_processing_service.gemini_files import (
+    encode_gemini_file_metadata,
+    get_or_refresh_gemini_file,
+    is_supported_file_type,
+)
+from app.services.ai_service.question_generator import generate_suggested_questions
+from app.services.ai_service.notes_service import (
+    NoteGenerationVariant,
+    generate_notes_for_material,
 )
 from app.services.storage_service import get_storage_backend
 import os
@@ -71,6 +81,23 @@ async def generate_light_overview(material_id: str) -> None:
                 md = "# Overview Processing Failed\n\nUnsupported file type."
                 page_count = mat.page_count or 0
 
+                gemini_metadata = None
+                if is_supported_file_type(mat.file_name or ""):
+                    try:
+                        gemini_metadata = await get_or_refresh_gemini_file(
+                            mat.content or "",
+                            obj_bytes,
+                            mat.file_name or "",
+                        )
+                        logger.info(
+                            "Gemini Files reference ready for material %s (expires %s)",
+                            mat.id,
+                            gemini_metadata.expires_at,
+                        )
+                    except Exception as exc:
+                        logger.error("Failed to obtain Gemini Files reference: %s", exc)
+                        gemini_metadata = None
+
                 # Write to temp file for processor
                 ext = os.path.splitext(mat.file_name or "")[1].lower() or ".bin"
                 with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp_file:
@@ -94,8 +121,22 @@ async def generate_light_overview(material_id: str) -> None:
                     except Exception:
                         pass
 
-                # Update processed_content envelope, page_count and mark overall status completed (overview ready)
+                # Generate AI-powered suggested questions (seamlessly during overview)
+                try:
+                    questions = await generate_suggested_questions(
+                        content=md,
+                        title=mat.title or mat.file_name or "Material"
+                    )
+                    logger.info(f"Generated {len(questions)} questions for material {material_id}")
+                except Exception as e:
+                    logger.warning(f"Question generation failed, will use fallback: {e}")
+                    questions = None
+
+                # Update processed_content envelope with overview and questions
                 new_payload = set_overview_env(mat.processed_content, md)
+                if questions:
+                    new_payload = set_suggestions_env(new_payload, questions)
+                    
                 await session.execute(
                     update(StudyMaterialModel)
                     .where(StudyMaterialModel.id == material_id)
@@ -103,6 +144,15 @@ async def generate_light_overview(material_id: str) -> None:
                         processed_content=new_payload,
                         page_count=page_count or mat.page_count,
                         status=MaterialStatus.completed,
+                        content=(
+                            encode_gemini_file_metadata(
+                                gemini_metadata.uri,
+                                gemini_metadata.expires_at,
+                                gemini_metadata.mime_type,
+                            )
+                            if gemini_metadata
+                            else (mat.content or "")
+                        ),
                     )
                 )
                 await session.commit()
@@ -143,37 +193,53 @@ async def generate_detailed_notes(material_id: str) -> None:
 
                 backend = get_storage_backend()
                 obj_bytes = await backend.get_bytes(key=mat.file_path)
-                ext = os.path.splitext(mat.file_name or "")[1].lower() or ".bin"
-                with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp_file:
-                    tmp_file.write(obj_bytes)
-                    tmp_path = tmp_file.name
 
-                try:
-                    if _is_pdf(mat.file_name or ""):
-                        _, md, page_count = await process_pdf_via_gemini(
-                            tmp_path, mode="detailed", title=(mat.title or mat.file_name or "Study Notes")
-                        )
-                    elif _is_image(mat.file_name or ""):
-                        _, md = await process_image_via_gemini(
-                            tmp_path, mode="detailed", title=(mat.title or mat.file_name or "Study Notes")
-                        )
-                    else:
-                        md = "# Processing Failed\n\nUnsupported file type."
-                finally:
-                    try:
-                        os.unlink(tmp_path)
-                    except Exception:
-                        pass
+                gemini_metadata = None
+                if _is_pdf(mat.file_name or "") or _is_image(mat.file_name or ""):
+                    if is_supported_file_type(mat.file_name or ""):
+                        try:
+                            gemini_metadata = await get_or_refresh_gemini_file(
+                                mat.content or "",
+                                obj_bytes,
+                                mat.file_name or "",
+                            )
+                        except Exception as exc:
+                            logger.warning("Unable to prepare Gemini Files reference: %s", exc)
+                            gemini_metadata = None
+
+                    notes_result = await generate_notes_for_material(
+                        file_bytes=obj_bytes,
+                        filename=mat.file_name or "",
+                        title=mat.title or mat.file_name or "Study Notes",
+                        variant=NoteGenerationVariant.detailed,
+                        gemini_file=gemini_metadata,
+                        page_count=mat.page_count,
+                    )
+                    md = notes_result.markdown
+                    if notes_result.page_count:
+                        page_count = notes_result.page_count
+                else:
+                    md = "# Processing Failed\n\nUnsupported file type."
 
                 new_payload = set_detailed_env(mat.processed_content, md)
+
+                update_values = {
+                    "processed_content": new_payload,
+                    "page_count": page_count or mat.page_count,
+                    "status": MaterialStatus.completed if not md.startswith("# Processing Failed") else MaterialStatus.failed,
+                }
+
+                if gemini_metadata:
+                    update_values["content"] = encode_gemini_file_metadata(
+                        gemini_metadata.uri,
+                        gemini_metadata.expires_at,
+                        gemini_metadata.mime_type,
+                    )
+
                 await session.execute(
                     update(StudyMaterialModel)
                     .where(StudyMaterialModel.id == material_id)
-                    .values(
-                        processed_content=new_payload,
-                        page_count=page_count or mat.page_count,
-                        status=MaterialStatus.completed if not md.startswith("# Processing Failed") else MaterialStatus.failed,
-                    )
+                    .values(**update_values)
                 )
                 await session.commit()
                 logger.info(f"Detailed notes generated for material {material_id}")
