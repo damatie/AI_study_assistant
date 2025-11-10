@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 # Initialize Gemini API
 genai.configure(api_key=settings.GOOGLE_API_KEY)
 
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 DEFAULT_MULTIMODAL_GENERATION_CONFIG: Dict[str, Any] = {
     "temperature": 0.65,
