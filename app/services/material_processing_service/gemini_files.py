@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import google.generativeai as genai
+from google.api_core import exceptions as google_exceptions
 
 from app.core.config import settings
 from app.core.genai_client import get_gemini_model
@@ -46,6 +47,23 @@ def _mime_type_for_filename(filename: str) -> str:
     if ext not in SUPPORTED_FILE_MIME_TYPES:
         raise ValueError(f"Unsupported file type for Gemini Files: {ext or 'unknown'}")
     return SUPPORTED_FILE_MIME_TYPES[ext]
+
+
+def _extract_file_name_from_uri(uri: str) -> Optional[str]:
+    """Return the file name segment expected by genai.get_file from a stored URI."""
+
+    if not uri:
+        return None
+
+    uri = uri.strip()
+    if uri.startswith("files/"):
+        return uri
+
+    if "/files/" in uri:
+        identifier = uri.rsplit("/files/", 1)[-1]
+        return f"files/{identifier.strip()}" if identifier else None
+
+    return uri
 
 
 async def upload_file_to_gemini(
@@ -164,22 +182,45 @@ async def get_or_refresh_gemini_file(
     if metadata:
         current_mime = metadata.mime_type or expected_mime
         if metadata.expires_at > now and current_mime == expected_mime:
-            logger.info(
-                "Using existing Gemini file URI (expires %s)",
-                metadata.expires_at,
-            )
-            return GeminiFileMetadata(
-                uri=metadata.uri,
-                expires_at=metadata.expires_at,
-                mime_type=current_mime,
-            )
+            file_name = _extract_file_name_from_uri(metadata.uri)
+            if not file_name:
+                logger.warning(
+                    "Stored Gemini file URI %s is malformed; re-uploading",
+                    metadata.uri,
+                )
+            else:
+                try:
+                    genai.get_file(name=file_name)
+                except google_exceptions.GoogleAPIError as exc:
+                    logger.warning(
+                        "Stored Gemini file %s is not accessible (reason: %s); re-uploading",
+                        metadata.uri,
+                        exc,
+                    )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.warning(
+                        "Unexpected error while validating Gemini file %s: %s; re-uploading",
+                        metadata.uri,
+                        exc,
+                    )
+                else:
+                    logger.info(
+                        "Using existing Gemini file URI (expires %s)",
+                        metadata.expires_at,
+                    )
+                    return GeminiFileMetadata(
+                        uri=metadata.uri,
+                        expires_at=metadata.expires_at,
+                        mime_type=current_mime,
+                    )
 
-        logger.info(
-            "Gemini file reference expired or mismatched (expires %s, mime %s -> %s); re-uploading",
-            metadata.expires_at,
-            current_mime,
-            expected_mime,
-        )
+        else:
+            logger.info(
+                "Gemini file reference expired or mismatched (expires %s, mime %s -> %s); re-uploading",
+                metadata.expires_at,
+                current_mime,
+                expected_mime,
+            )
     else:
         logger.info("No Gemini file metadata found; uploading material: %s", filename)
 
