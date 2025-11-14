@@ -81,6 +81,13 @@ class Settings(BaseSettings):
     # Refund policy
     REFUND_COOL_OFF_HOURS: int = 24
 
+    # Document conversion (Gotenberg)
+    GOTENBERG_URL: str | None = None
+    GOTENBERG_TIMEOUT_SECONDS: int = 45
+    GOTENBERG_MAX_FILE_SIZE_MB: int | None = 40
+    GOTENBERG_SKIP_TLS_VERIFY: bool = False
+    GOTENBERG_HEALTHCHECK_PATH: str = "health"
+
 
 def _normalize_settings(settings: Settings) -> None:
     """Normalize alternative environment variable names into canonical ones."""

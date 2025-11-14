@@ -3,6 +3,16 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 
 
+def _normalize_email_value(email: str | None) -> str:
+    """Normalize user-provided email strings for consistent lookups."""
+    if email is None:
+        raise ValueError("Email cannot be empty.")
+    normalized = email.strip().lower()
+    if not normalized:
+        raise ValueError("Email cannot be empty.")
+    return normalized
+
+
 # User/auth
 class UserCreate(BaseModel):
     first_name: str = Field(
@@ -33,7 +43,7 @@ class UserCreate(BaseModel):
     # Normalize email
     @field_validator("email", mode="before")
     def normalize_email(cls, email: str) -> str:
-        return email.strip().lower()
+        return _normalize_email_value(email)
 
     # Validate password with strong rules
     @field_validator("password")
@@ -58,6 +68,10 @@ class LoginRequest(BaseModel):
     )
     password: str = Field(..., example="securePassword1!")
 
+    @field_validator("email", mode="before")
+    def normalize_email(cls, email: str) -> str:
+        return _normalize_email_value(email)
+
 
 # Token
 class Token(BaseModel):
@@ -78,17 +92,29 @@ class EmailVerificationRequest(BaseModel):
     )
     otp: str = Field(..., description="OTP code", example="123456")
 
+    @field_validator("email", mode="before")
+    def normalize_email(cls, email: str) -> str:
+        return _normalize_email_value(email)
+
 # Email verification code request
 class EmailVerificationCodeRequest(BaseModel):
     email: EmailStr = Field(
         ..., description="User's email address", example="user@example.com"
     )
 
+    @field_validator("email", mode="before")
+    def normalize_email(cls, email: str) -> str:
+        return _normalize_email_value(email)
+
 # Forgot/reset password
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr = Field(
         ..., description="User's email address", example="user@example.com"
     )
+
+    @field_validator("email", mode="before")
+    def normalize_email(cls, email: str) -> str:
+        return _normalize_email_value(email)
 
 
 # Reset password request
@@ -120,6 +146,10 @@ class ResetPasswordRequest(BaseModel):
                 "Password must include at least one special character (!@#$%^&*()-_+=)."
             )
         return value
+
+    @field_validator("email", mode="before")
+    def normalize_email(cls, email: str) -> str:
+        return _normalize_email_value(email)
 
 
 # Refresh token
