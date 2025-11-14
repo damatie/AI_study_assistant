@@ -27,6 +27,12 @@ from app.services.material_processing_service.handle_material_processing import 
     process_image_via_gemini,
 )
 from app.services.material_processing_service.tasks import generate_light_overview, generate_detailed_notes
+from app.services.material_processing_service.office_documents import get_office_page_count
+from app.services.document_conversion.gotenberg_client import (
+    convert_office_document_to_pdf,
+    GotenbergConversionError,
+    GotenbergNotConfigured,
+)
 from app.utils.processed_payload import get_overview, get_detailed, set_overview_env
 from app.services.subscription_access import get_active_subscription
 from app.services.track_usage_service.handle_usage_cycle import get_or_create_usage
@@ -72,7 +78,8 @@ async def upload_material(
             limit=plan.monthly_upload_limit,
         )
 
-    accepted_exts = {".pdf", ".jpg", ".jpeg", ".png"}
+    accepted_exts = {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx"}
+    office_exts = {".doc", ".docx"}
     _, ext = os.path.splitext(file.filename or "")
     ext = ext.lower()
     if ext not in accepted_exts:
@@ -83,21 +90,21 @@ async def upload_material(
         )
 
     try:
-        # 2) Read upload bytes and push to storage backend
-        content_bytes = await file.read()
-        # Generate a UUID for DB primary key as a UUID object (not string)
+        # 2) Read upload bytes (mutated below before storage)
+        original_bytes = await file.read()
+        content_bytes = original_bytes
+
+        # Generate identifiers and default metadata
         material_uuid = uuid.uuid4()
-        file_ext = os.path.splitext(file.filename)[1] if file.filename else ".pdf"
-        object_key = await store_bytes(data=content_bytes, filename=file.filename or f"upload{file_ext}", content_type=file.content_type)
-
-        logger.info(f"User {current_user.id} uploading file {file.filename} to storage key: {object_key}")
-
-        # 3) Validate the file is actually a PDF if claimed to be
+        storage_filename = file.filename or (f"upload{ext}" if ext else "upload")
+        storage_content_type = file.content_type or "application/octet-stream"
+        stored_extension = os.path.splitext(storage_filename)[1].lower() if storage_filename else ext
         page_count = 1
+        converted_to_pdf = False
 
-        if file.content_type == "application/pdf" or file_ext.lower() == ".pdf":
+        # 3) Validate file size via page count heuristics and optionally convert Office docs
+        if storage_content_type == "application/pdf" or stored_extension == ".pdf":
             try:
-                # Use centralized PDF page count function
                 page_count = get_pdf_page_count_from_bytes(content_bytes)
                 if page_count > plan.pages_per_upload_limit:
                     return plan_limit_error(
@@ -110,14 +117,84 @@ async def upload_material(
                     )
             except Exception as e:
                 logger.warning(f"Could not verify PDF pages in memory: {e}")
+        elif ext in office_exts:
+            try:
+                page_count = get_office_page_count(content_bytes, ext)
+                if page_count > plan.pages_per_upload_limit:
+                    return plan_limit_error(
+                        message=f"This file has approximately {page_count} pages, exceeding your plan limit of {plan.pages_per_upload_limit}.",
+                        error_type="PAGES_PER_UPLOAD_LIMIT_EXCEEDED",
+                        current_plan=plan.name,
+                        metric="pages_per_upload",
+                        actual=page_count,
+                        limit=plan.pages_per_upload_limit,
+                    )
+            except Exception as e:
+                logger.warning(f"Could not verify Office document pages: {e}")
 
-        # 4) Create DB row. Set status=processing while we synchronously generate overview.
+            # Try to convert to PDF for downstream processing & preview
+            try:
+                conversion = await convert_office_document_to_pdf(
+                    document_bytes=original_bytes,
+                    filename=file.filename or f"upload{ext}",
+                )
+                content_bytes = conversion.content
+                storage_filename = conversion.filename or f"{os.path.splitext(storage_filename)[0] or 'document'}.pdf"
+                storage_content_type = conversion.content_type or "application/pdf"
+                stored_extension = ".pdf"
+                try:
+                    page_count = get_pdf_page_count_from_bytes(content_bytes)
+                    if page_count > plan.pages_per_upload_limit:
+                        return plan_limit_error(
+                            message=f"This file has {page_count} pages, exceeding your plan limit of {plan.pages_per_upload_limit}.",
+                            error_type="PAGES_PER_UPLOAD_LIMIT_EXCEEDED",
+                            current_plan=plan.name,
+                            metric="pages_per_upload",
+                            actual=page_count,
+                            limit=plan.pages_per_upload_limit,
+                        )
+                except Exception as pdf_err:
+                    logger.warning(f"Failed to compute page count from converted PDF: {pdf_err}")
+                converted_to_pdf = True
+                logger.info("Converted Office document %s to PDF via Gotenberg", file.filename)
+            except GotenbergNotConfigured:
+                logger.info("Gotenberg not configured; storing original Office document.")
+            except GotenbergConversionError as conversion_error:
+                logger.warning("Gotenberg conversion failed (%s); storing original Office document.", conversion_error)
+
+        # 4) Store the (possibly converted) payload in the configured backend
+        object_key = await store_bytes(
+            data=content_bytes,
+            filename=storage_filename,
+            content_type=storage_content_type,
+        )
+
+        logger.info(
+            "User %s uploading file %s to storage key: %s",
+            current_user.id,
+            storage_filename,
+            object_key,
+        )
+
+        # As a safety, recompute page count for converted PDFs if we skipped earlier logic
+        if storage_content_type == "application/pdf" and not converted_to_pdf:
+            try:
+                page_count = get_pdf_page_count_from_bytes(content_bytes)
+            except Exception as e:
+                logger.warning(f"Could not verify PDF pages in memory: {e}")
+        elif ext in office_exts and not converted_to_pdf:
+            try:
+                page_count = get_office_page_count(content_bytes, ext)
+            except Exception as e:
+                logger.warning(f"Could not verify Office document pages: {e}")
+
+        # 5) Create DB row. Set status=processing while we synchronously generate overview.
         material_id = material_uuid  # Use UUID object for database PK
         mat = StudyMaterialModel(
             id=material_id,
             user_id=current_user.id,
             title=title,
-            file_name=file.filename,
+            file_name=storage_filename,
             file_path=object_key,  # store object key
             content="",
             processed_content=None,
@@ -129,12 +206,12 @@ async def upload_material(
         await db.commit()
         await db.refresh(mat)
 
-        # 5) Increment usage
+        # 6) Increment usage
         usage.uploads_count += 1
         db.add(usage)
         await db.commit()
 
-        # 6) Queue background task for overview generation (non-blocking)
+        # 7) Queue background task for overview generation (non-blocking)
         asyncio.create_task(generate_light_overview(str(material_id)))
         logger.info(f"Queued background overview generation for material {material_id}")
 
