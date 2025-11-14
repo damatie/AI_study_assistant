@@ -12,6 +12,7 @@ from app.utils.processed_payload import set_overview_env, set_detailed_env, set_
 from app.services.material_processing_service.handle_material_processing import (
     process_pdf_via_gemini,
     process_image_via_gemini,
+    process_office_doc_via_gemini,
 )
 from app.services.material_processing_service.gemini_files import (
     encode_gemini_file_metadata,
@@ -46,6 +47,11 @@ def _is_pdf(name: str) -> bool:
 
 def _is_image(name: str) -> bool:
     return any(name.lower().endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp"))
+
+
+def _is_office(name: str) -> bool:
+    lowered = (name or "").lower()
+    return lowered.endswith(".doc") or lowered.endswith(".docx")
 
 async def _get_material(session: AsyncSession, material_id: str) -> Optional[StudyMaterialModel]:
     return await session.get(StudyMaterialModel, material_id)
@@ -111,6 +117,10 @@ async def generate_light_overview(material_id: str) -> None:
                         )
                     elif _is_image(mat.file_name or ""):
                         _, md = await process_image_via_gemini(
+                            tmp_path, mode="overview", title=(mat.title or mat.file_name or "Overview")
+                        )
+                    elif _is_office(mat.file_name or ""):
+                        _, md, page_count = await process_office_doc_via_gemini(
                             tmp_path, mode="overview", title=(mat.title or mat.file_name or "Overview")
                         )
                     else:
@@ -195,7 +205,7 @@ async def generate_detailed_notes(material_id: str) -> None:
                 obj_bytes = await backend.get_bytes(key=mat.file_path)
 
                 gemini_metadata = None
-                if _is_pdf(mat.file_name or "") or _is_image(mat.file_name or ""):
+                if _is_pdf(mat.file_name or "") or _is_image(mat.file_name or "") or _is_office(mat.file_name or ""):
                     if is_supported_file_type(mat.file_name or ""):
                         try:
                             gemini_metadata = await get_or_refresh_gemini_file(

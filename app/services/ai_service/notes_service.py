@@ -13,6 +13,11 @@ from app.core.genai_client import (
 	FALLBACK_TEXT_GENERATION_CONFIG,
 	get_gemini_model,
 )
+from app.services.document_conversion.gotenberg_client import (
+	convert_office_document_to_pdf,
+	GotenbergConversionError,
+	GotenbergNotConfigured,
+)
 from app.services.material_processing_service.gemini_files import (
 	GeminiFileMetadata,
 	SUPPORTED_FILE_MIME_TYPES,
@@ -20,6 +25,10 @@ from app.services.material_processing_service.gemini_files import (
 )
 from app.services.material_processing_service.handle_material_processing import (
 	get_pdf_page_count_from_bytes,
+)
+from app.services.material_processing_service.office_documents import (
+	get_office_page_count,
+	extract_docx_text,
 )
 from app.utils.stepsjson import (
 	filter_trivial_blocks,
@@ -31,6 +40,7 @@ from app.utils.stepsjson import (
 logger = logging.getLogger(__name__)
 
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+_OFFICE_EXTENSIONS = {".doc", ".docx"}
 
 
 class NoteGenerationVariant(str, Enum):
@@ -65,6 +75,15 @@ async def generate_notes_for_material(
 	if ext == ".pdf":
 		return await _generate_detailed_notes_from_pdf(
 			pdf_bytes=file_bytes,
+			title=title,
+			page_count=page_count,
+			gemini_file=gemini_file,
+			filename=filename,
+		)
+
+	if ext in _OFFICE_EXTENSIONS:
+		return await _generate_detailed_notes_from_office(
+			doc_bytes=file_bytes,
 			title=title,
 			page_count=page_count,
 			gemini_file=gemini_file,
@@ -307,6 +326,109 @@ async def _generate_detailed_notes_from_pdf(
 		markdown = _post_process_markdown(response.text)
 		logger.info("Generated detailed notes (fallback) length=%s", len(markdown))
 		return NoteGenerationResult(markdown=markdown, page_count=computed_page_count)
+
+
+async def _generate_detailed_notes_from_office(
+	*,
+	doc_bytes: bytes,
+	title: Optional[str],
+	page_count: Optional[int],
+	gemini_file: Optional[GeminiFileMetadata],
+	filename: str,
+) -> NoteGenerationResult:
+	"""Generate detailed notes for DOC/DOCX files."""
+
+	ext = _extension_for(filename)
+	computed_page_count: Optional[int] = page_count
+	if computed_page_count is None:
+		try:
+			computed_page_count = get_office_page_count(doc_bytes, ext)
+		except Exception:
+			logger.warning("Falling back to unknown page count for Office notes")
+			computed_page_count = None
+
+	conversion_pdf_bytes: Optional[bytes] = None
+	conversion_filename: Optional[str] = None
+	try:
+		conversion = await convert_office_document_to_pdf(
+			document_bytes=doc_bytes,
+			filename=filename,
+		)
+		conversion_pdf_bytes = conversion.content
+		conversion_filename = conversion.filename
+		try:
+			conversion_page_count = get_pdf_page_count_from_bytes(conversion_pdf_bytes)
+		except Exception:
+			logger.warning("Failed to derive page count from converted PDF; keeping prior estimate.")
+			conversion_page_count = None
+		if conversion_page_count is not None:
+			computed_page_count = conversion_page_count
+	except GotenbergNotConfigured:
+		logger.info("Gotenberg not configured; using direct Office notes path.")
+	except GotenbergConversionError as conversion_error:
+		logger.warning("Gotenberg conversion failed (%s); using direct Office notes path.", conversion_error)
+
+	if conversion_pdf_bytes is not None:
+		fallback_pdf_name = conversion_filename or f"{os.path.splitext(filename or 'document')[0]}.pdf"
+		return await _generate_detailed_notes_from_pdf(
+			pdf_bytes=conversion_pdf_bytes,
+			title=title,
+			page_count=computed_page_count,
+			gemini_file=None,
+			filename=fallback_pdf_name,
+		)
+
+	prompt = _build_detailed_notes_prompt(computed_page_count, title)
+	default_mime = _resolve_mime_type(filename, "application/msword")
+
+	via_files_markdown = await _try_gemini_files_path(
+		prompt=prompt,
+		gemini_file=gemini_file,
+		filename=filename,
+		default_mime=default_mime,
+		log_suffix="office",
+	)
+	if via_files_markdown is not None:
+		return NoteGenerationResult(markdown=via_files_markdown, page_count=computed_page_count)
+
+	model = get_gemini_model()
+	try:
+		markdown = await _generate_via_bytes(
+			model=model,
+			prompt=prompt,
+			mime_type=default_mime,
+			payload=doc_bytes,
+			log_suffix="office",
+		)
+		return NoteGenerationResult(markdown=markdown, page_count=computed_page_count)
+
+	except Exception as primary_error:  # noqa: BLE001
+		logger.warning(
+			"Office multimodal detailed notes failed (%s); attempting fallback",
+			primary_error,
+		)
+		if ext == ".docx":
+			extracted_text = extract_docx_text(doc_bytes)
+			if extracted_text:
+				fallback_prompt = (
+					prompt
+					+ "\n\nUse ONLY the extracted text below:\n\n[BEGIN EXTRACTED TEXT]\n"
+					+ extracted_text
+					+ "\n[END EXTRACTED TEXT]"
+				)
+				response = await model.generate_content_async(
+					fallback_prompt,
+					generation_config=FALLBACK_TEXT_GENERATION_CONFIG.copy(),
+				)
+				markdown = _post_process_markdown(response.text)
+				logger.info(
+					"Generated detailed notes (fallback office) length=%s",
+					len(markdown),
+				)
+				return NoteGenerationResult(markdown=markdown, page_count=computed_page_count)
+
+	logger.exception("Unable to generate detailed notes for Office document")
+	return NoteGenerationResult(markdown="# Processing Failed\n\nAn error occurred.", page_count=computed_page_count)
 
 
 async def _generate_detailed_notes_from_image(
