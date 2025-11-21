@@ -53,3 +53,17 @@ class TransactionType(str, enum.Enum):
     initial = "initial"
     recurring = "recurring"
     refund = "refund"
+
+
+class BroadcastAudienceType(str, enum.Enum):
+    all = "all"
+    verified = "verified"
+    unverified = "unverified"
+    plan = "plan"
+    custom = "custom"
+
+
+class BroadcastStatus(str, enum.Enum):
+    pending = "pending"
+    sent = "sent"
+    failed = "failed"

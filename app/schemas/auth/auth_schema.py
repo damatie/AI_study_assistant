@@ -16,28 +16,30 @@ def _normalize_email_value(email: str | None) -> str:
 # User/auth
 class UserCreate(BaseModel):
     first_name: str = Field(
-        ..., 
-        min_length=1, 
-        max_length=20, 
+        ...,
+        min_length=1,
+        max_length=20,
         description="User's first name (must be between 1 and 20 characters)",
-        example="John"
+        json_schema_extra={"example": "John"},
     )
     last_name: str = Field(
-        ..., 
-        min_length=1, 
-        max_length=20, 
+        ...,
+        min_length=1,
+        max_length=20,
         description="User's last name (must be between 1 and 20 characters)",
-        example="Doe"
+        json_schema_extra={"example": "Doe"},
     )
     email: EmailStr = Field(
-        ..., description="User's email address", example="user@example.com"
+        ...,
+        description="User's email address",
+        json_schema_extra={"example": "user@example.com"},
     )
     password: str = Field(
         ...,
         min_length=8,
         max_length=128,
         description="User's password (must be between 8 and 128 characters and include letters, numbers, and special characters)",
-        example="securePassword1!",
+        json_schema_extra={"example": "securePassword1!"},
     )
 
     # Normalize email
@@ -64,9 +66,14 @@ class UserCreate(BaseModel):
 
 class LoginRequest(BaseModel):
     email: EmailStr = Field(
-        ..., description="User's email address", example="user@example.com"
+        ...,
+        description="User's email address",
+        json_schema_extra={"example": "user@example.com"},
     )
-    password: str = Field(..., example="securePassword1!")
+    password: str = Field(
+        ...,
+        json_schema_extra={"example": "securePassword1!"},
+    )
 
     @field_validator("email", mode="before")
     def normalize_email(cls, email: str) -> str:
@@ -88,9 +95,15 @@ class TokenData(BaseModel):
 # Email verification
 class EmailVerificationRequest(BaseModel):
     email: EmailStr = Field(
-        ..., description="User's email address", example="user@example.com"
+        ...,
+        description="User's email address",
+        json_schema_extra={"example": "user@example.com"},
     )
-    otp: str = Field(..., description="OTP code", example="123456")
+    otp: str = Field(
+        ...,
+        description="OTP code",
+        json_schema_extra={"example": "123456"},
+    )
 
     @field_validator("email", mode="before")
     def normalize_email(cls, email: str) -> str:
@@ -99,7 +112,9 @@ class EmailVerificationRequest(BaseModel):
 # Email verification code request
 class EmailVerificationCodeRequest(BaseModel):
     email: EmailStr = Field(
-        ..., description="User's email address", example="user@example.com"
+        ...,
+        description="User's email address",
+        json_schema_extra={"example": "user@example.com"},
     )
 
     @field_validator("email", mode="before")
@@ -109,7 +124,9 @@ class EmailVerificationCodeRequest(BaseModel):
 # Forgot/reset password
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr = Field(
-        ..., description="User's email address", example="user@example.com"
+        ...,
+        description="User's email address",
+        json_schema_extra={"example": "user@example.com"},
     )
 
     @field_validator("email", mode="before")
@@ -120,15 +137,21 @@ class ForgotPasswordRequest(BaseModel):
 # Reset password request
 class ResetPasswordRequest(BaseModel):
     email: EmailStr = Field(
-        ..., description="User's email address", example="user@example.com"
+        ...,
+        description="User's email address",
+        json_schema_extra={"example": "user@example.com"},
     )
-    otp: str = Field(..., description="OTP code", example="123456")
+    otp: str = Field(
+        ...,
+        description="OTP code",
+        json_schema_extra={"example": "123456"},
+    )
     new_password: str = Field(
         ...,
         min_length=8,
         max_length=128,
         description="User's password (must be between 8 and 128 characters and include letters, numbers, and special characters)",
-        example="securePassword1!",
+        json_schema_extra={"example": "securePassword1!"},
     )
 
     # Validate new password with strong rules
@@ -177,7 +200,7 @@ class UpdatePasswordRequest(BaseModel):
         min_length=8,
         max_length=128,
         description="User's password (must be between 8 and 128 characters and include letters, numbers, and special characters)",
-        example="securePassword1!",
+        json_schema_extra={"example": "securePassword1!"},
     )
     @field_validator("new_password")
     def validate_password(cls, value: str) -> str:

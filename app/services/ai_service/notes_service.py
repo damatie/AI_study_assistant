@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+
+from pypdf import PdfReader
 
 from app.core.genai_client import (
 	DEFAULT_MULTIMODAL_GENERATION_CONFIG,
@@ -483,11 +486,7 @@ def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
 	"""Best-effort plain-text extraction for fallback summarization."""
 
 	try:
-		import io
-
-		import PyPDF2
-
-		reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+		reader = PdfReader(io.BytesIO(pdf_bytes))
 		texts: list[str] = []
 		for page in reader.pages:
 			try:

@@ -71,6 +71,30 @@ async def get_active_subscription(
     return result.scalars().first()
 
 
+async def expire_lapsed_subscriptions(user_id: uuid.UUID, db: AsyncSession) -> int:
+    """Mark any past-due subscriptions as expired so only current rows stay active.
+    
+    Note: Does NOT expire subscriptions in retry period - those are still valid!
+    """
+    now = get_current_utc_datetime()
+    stale_query = await db.execute(
+        select(Subscription).where(
+            Subscription.user_id == user_id,
+            Subscription.status == SubscriptionStatus.active,
+            Subscription.period_end <= now,
+            Subscription.is_in_retry_period == False,  # Don't expire if in retry!
+        )
+    )
+    stale_rows = stale_query.scalars().all()
+    for subscription in stale_rows:
+        subscription.status = SubscriptionStatus.expired
+        subscription.auto_renew = False
+        subscription.is_in_retry_period = False
+        subscription.retry_attempt_count = 0
+        db.add(subscription)
+    return len(stale_rows)
+
+
 async def create_free_subscription(
     user: User, db: AsyncSession, duration_days: int = 30
 ) -> Subscription:
@@ -93,6 +117,8 @@ async def create_free_subscription(
         This should NOT be used for paid plan renewals.
         Paid renewals are handled by payment provider webhooks.
     """
+    await expire_lapsed_subscriptions(user.id, db)
+
     now = get_current_utc_datetime()
     period_start = now
     period_end = now + timedelta(days=duration_days)

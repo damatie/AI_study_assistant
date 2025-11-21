@@ -10,6 +10,7 @@ from .subscription import Subscription
 from .transaction import Transaction
 from .flash_card_set import FlashCardSet
 from .plan_price import PlanPrice
+from .admin_broadcast import AdminBroadcast
 
 __all__ = [
     "Plan",
@@ -19,7 +20,8 @@ __all__ = [
     "AssessmentSession",
     "Submission",
     "Subscription",
-    "Transaction"
-    ,"FlashCardSet",
+    "Transaction",
+    "FlashCardSet",
     "PlanPrice",
+    "AdminBroadcast",
 ]
