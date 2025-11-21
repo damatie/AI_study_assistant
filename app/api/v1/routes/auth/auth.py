@@ -157,6 +157,13 @@ async def login(
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_type": "bearer",
+            "user": {
+                "id": str(user.id),
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "role": user.role.value if isinstance(user.role, Role) else user.role,
+            },
         },
     )
 

@@ -137,9 +137,13 @@ async def get_profile(
         auto_renew_value = None
         canceled_at_value = None
     else:
-        subscription_status_value = (
-            sub.status.value if sub else SubscriptionStatus.expired.value
-        )
+        # Display active if in retry period, regardless of database status
+        if sub and sub.is_in_retry_period:
+            subscription_status_value = SubscriptionStatus.active.value
+        else:
+            subscription_status_value = (
+                sub.status.value if sub else SubscriptionStatus.expired.value
+            )
         subscription_start_value = (
             sub.period_start.isoformat() if sub else None
         )

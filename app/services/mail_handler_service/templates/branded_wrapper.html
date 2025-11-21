@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ subject or title or app_name }} • {{ app_name }}</title>
+  </head>
+  <body
+    style="
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, Arial, sans-serif;
+      max-width: 100%;
+      padding: 30px 10px;
+      background-color: #f5f5f5;
+    "
+  >
+    <div
+      style="
+        max-width: 600px;
+        margin: 30px auto;
+        padding: 30px 10px;
+        padding-bottom: 10px;
+        background-color: #ffffff;
+      "
+    >
+      <!-- Header with Logo -->
+      <div
+        style="background-color: #ffffff; padding: 0px 20px; text-align: left"
+      >
+        {% if logo_url %}
+        <img
+          src="{{ logo_url }}"
+          alt="{{ app_name }} Logo"
+          style="max-height: 60px; max-width: 200px; margin-bottom: auto"
+        />
+        {% else %}
+        <div
+          style="
+            font-size: 28px;
+            font-weight: bold;
+            color: #2e2eb8;
+            margin-bottom: auto;
+          "
+        >
+          {{ app_name }}
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Main Content -->
+      <div style="background-color: #ffffff; padding: 40px 20px">
+        {% if eyebrow or preheader_text %}
+        <p
+          style="
+            font-size: 12px;
+            letter-spacing: 0.3em;
+            text-transform: uppercase;
+            color: #6b7280;
+            margin: 0 0 16px 0;
+          "
+        >
+          {{ eyebrow or preheader_text }}
+        </p>
+        {% endif %} {% if title %}
+        <h1 style="color: #1f2937; margin-top: 0; margin-bottom: 20px">
+          {{ title }}
+        </h1>
+        {% endif %} {% if subtitle %}
+        <p style="color: #4b5563; line-height: 1.6; margin-bottom: 20px">
+          {{ subtitle }}
+        </p>
+        {% endif %} {% if greeting %}
+        <p style="color: #4b5563; line-height: 1.6; margin-bottom: 20px">
+          {{ greeting }}
+        </p>
+        {% endif %} {% if body_paragraphs %} {% for paragraph in body_paragraphs
+        %}
+        <p style="color: #4b5563; line-height: 1.6; margin-bottom: 20px">
+          {{ paragraph }}
+        </p>
+        {% endfor %} {% endif %} {% if highlight_text %}
+        <div
+          style="
+            background: #f5f5f5a2;
+            padding: 30px;
+            margin: 30px 0;
+            border-radius: 12px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+          "
+        >
+          {{ highlight_text }}
+        </div>
+        {% endif %} {% if content_html %}
+        <div style="color: #4b5563; line-height: 1.6">
+          {{ content_html | safe }}
+        </div>
+        {% endif %} {% if cta_url and cta_label %}
+        <div style="text-align: center; margin: 30px 0">
+          <a
+            href="{{ cta_url }}"
+            style="
+              background: #2e2eb8;
+              color: #fff;
+              padding: 16px 32px;
+              border-radius: 8px;
+              text-decoration: none;
+              display: inline-block;
+              font-weight: bold;
+              font-size: 16px;
+            "
+          >
+            {{ cta_label }}
+          </a>
+        </div>
+        {% endif %} {% if secondary_text %}
+        <p style="color: #6b7280; line-height: 1.6; margin-bottom: 20px">
+          {{ secondary_text }}
+        </p>
+        {% endif %}
+      </div>
+    </div>
+    <!-- Footer -->
+    <div style="padding: 20px; text-align: center">
+      <p style="color: #6b7280; font-size: 14px; margin: 0">
+        <a
+          href="mailto:{{ support_email }}"
+          style="
+            background: #2e2eb8;
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 4px;
+            text-decoration: none;
+            display: inline-block;
+          "
+          >Need Help?</a
+        >
+      </p>
+      <p style="color: #9ca3af; font-size: 12px; margin: 20px 0 0 0">
+        © {{ current_year or "2025" }} {{ app_name }}. All rights reserved.
+      </p>
+    </div>
+  </body>
+</html>

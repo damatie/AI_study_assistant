@@ -1,18 +1,25 @@
-from typing import List, Optional, Annotated
-from pydantic import BaseModel, Field
+from typing import Annotated, List, Optional
+from pydantic import BaseModel, Field, ConfigDict, StringConstraints
 from uuid import UUID
 from app.models.assessment_session import Difficulty
 from app.utils.enums import FlashCardStatus
 
 
+StrippedShortStr = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+
+
 class FlashCardItem(BaseModel):
-    prompt: Annotated[str, Field(strip_whitespace=True, min_length=1, description="Front side text/question")]
-    correspondingInformation: Annotated[str, Field(strip_whitespace=True, min_length=1, description="Back side detailed info/answer")]
+    prompt: StrippedShortStr = Field(
+        ..., description="Front side text/question"
+    )
+    correspondingInformation: StrippedShortStr = Field(
+        ..., description="Back side detailed info/answer"
+    )
     hint: Optional[str] = Field(None, description="Optional brief hint")
 
 
 class FlashCardSetBase(BaseModel):
-    title: Annotated[str, Field(strip_whitespace=True, min_length=1)]
+    title: StrippedShortStr
     topic: Optional[str] = None
     difficulty: Difficulty
 
@@ -29,8 +36,7 @@ class FlashCardSetOut(FlashCardSetBase):
     status: Optional[FlashCardStatus] = None
     cards: List[FlashCardItem]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FlashCardSetListItem(BaseModel):

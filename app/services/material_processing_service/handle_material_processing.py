@@ -5,7 +5,7 @@ import logging
 import os
 import tempfile
 from typing import Tuple, Optional
-import PyPDF2
+from pypdf import PdfReader
 
 from app.core.genai_client import (
     DEFAULT_MULTIMODAL_GENERATION_CONFIG,
@@ -62,7 +62,7 @@ def _build_overview_prompt(title: Optional[str], page_count: Optional[int]) -> s
 def get_pdf_page_count_from_bytes(pdf_bytes: bytes) -> int:
     """Return number of pages from PDF bytes."""
     try:
-        reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+        reader = PdfReader(io.BytesIO(pdf_bytes))
         return len(reader.pages)
     except Exception:
         logger.exception("Failed to read PDF page count from bytes")
@@ -70,12 +70,12 @@ def get_pdf_page_count_from_bytes(pdf_bytes: bytes) -> int:
 
 
 def _extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
-    """Best-effort text extraction from PDF bytes using PyPDF2.
+    """Best-effort text extraction from PDF bytes using pypdf.
 
     Returns a string (may be empty) with pages joined by two newlines.
     """
     try:
-        reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+        reader = PdfReader(io.BytesIO(pdf_bytes))
         texts = []
         for page in reader.pages:
             try:

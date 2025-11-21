@@ -36,3 +36,8 @@ class User(Base):
     usage_tracking = relationship("UsageTracking", back_populates="user", cascade="all, delete-orphan")
     study_materials = relationship("StudyMaterial", back_populates="user", cascade="all, delete-orphan")
     assessment_sessions = relationship("AssessmentSession", back_populates="user", cascade="all, delete-orphan")
+    broadcasts_sent = relationship(
+        "AdminBroadcast",
+        back_populates="sent_by",
+        passive_deletes=True,
+    )
