@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     APP_URL: str
     FRONTEND_APP_URL: str | None = None
-    LOGO: str = 'https://res.cloudinary.com/webmataz/image/upload/v1748798978/Assets/logo_hkakvj.png'
+    LOGO: str = 'https://res.cloudinary.com/webmataz/image/upload/v1763240346/full-logo-blue_d0pynz.png'
     
     # CORS settings
     ALLOWED_ORIGINS: list[str] = ["*"]  # In production, specify actual origins

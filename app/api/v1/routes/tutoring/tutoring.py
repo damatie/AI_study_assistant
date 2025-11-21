@@ -35,12 +35,12 @@ class QuestionRequest(BaseModel):
     question: str = Field(
         ...,
         description="The question to be answered",
-        example="What is photosynthesis?",
+        json_schema_extra={"example": "What is photosynthesis?"},
     )
     context_id: Optional[uuid.UUID] = Field(
         None,
         description="UUID of the study material for context",
-        example="3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        json_schema_extra={"example": "3fa85f64-5717-4562-b3fc-2c963f66afa6"},
     )
     tone: Literal['academic', 'conversational'] = Field(
         default='academic',

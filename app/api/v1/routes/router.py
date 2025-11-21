@@ -18,6 +18,7 @@ from app.api.v1.routes.payments import (
     stripe_webhooks_router,
     paystack_webhooks_router,
 )
+from app.api.v1.routes.admin.admin import router as admin_router
 
 router = APIRouter()
 
@@ -43,6 +44,9 @@ protected_router.include_router(transactions_router)
 
 # Include protected router in main router
 router.include_router(protected_router)
+
+# Admin routes (role-gated, no subscription dependency)
+router.include_router(admin_router)
 
 # Debug routes (development - typically would be public or have separate auth)
 router.include_router(debug_router)
