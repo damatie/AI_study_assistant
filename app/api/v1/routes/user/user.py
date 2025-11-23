@@ -55,10 +55,16 @@ async def get_profile(
         select(Subscription)
         .where(
             Subscription.user_id == current_user.id,
-            Subscription.period_start <= now,
-            Subscription.period_end > now,
+            (
+                (
+                    (Subscription.period_start <= now)
+                    & (Subscription.period_end > now)
+                )
+                | (Subscription.is_in_retry_period == True)
+            ),
             Subscription.status.in_([SubscriptionStatus.active, SubscriptionStatus.cancelled]),
         )
+        .order_by(Subscription.period_end.desc())
     )
     sub = result.scalars().first()
 
