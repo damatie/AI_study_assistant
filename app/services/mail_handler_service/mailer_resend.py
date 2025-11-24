@@ -120,14 +120,22 @@ async def send_verification_email(email: str, code: str, name:str) -> Dict[str, 
         Dict containing email ID and response data
     """
     try:
+        from urllib.parse import urlencode
+
+        frontend_base = settings.FRONTEND_APP_URL or settings.APP_URL
+        if not frontend_base:
+            raise EmailError("FRONTEND_APP_URL is not configured")
+        verify_url = f"{frontend_base.rstrip('/')}/verify-email?{urlencode({'email': email})}"
+
         # Render HTML template
         tpl = env.get_template("verification.html")
         html = tpl.render(
             code=code,
             name=name,
+            verify_url=verify_url,
             app_name="knoledg",
             support_email=settings.RESEND_FROM_EMAIL,
-             logo_url=settings.LOGO
+            logo_url=settings.LOGO
         )
         
         # Plain text fallback
@@ -137,6 +145,8 @@ knoledg - Email Verification
 Your verification code is: {code}
 
 This code expires in 10 minutes. If you didn't request this verification, please ignore this email.
+
+Verify here: {verify_url}
 
 Need help? Contact us at {settings.RESEND_FROM_EMAIL}
         """.strip()
