@@ -12,7 +12,7 @@ from app.core.logging_config import get_logger
 from app.db.deps import get_db
 from app.models.user import User
 from app.models.transaction import Transaction
-from app.utils.enums import TransactionStatus, PaymentProvider, TransactionStatusReason
+from app.utils.enums import TransactionStatus, PaymentProvider, TransactionStatusReason, SubscriptionStatus
 from app.services.payments.subscription_service import SubscriptionService
 from sqlalchemy import select
 
@@ -175,7 +175,10 @@ async def _handle_checkout_completed(event, db: AsyncSession, service: Subscript
 async def _handle_invoice_paid(event, db: AsyncSession, service: SubscriptionService):
     """Handle invoice.payment_succeeded - Extend subscription (recurring)."""
     invoice = event["data"]["object"]
-    subscription_id = invoice.get("subscription")
+    # Handle both old format (subscription at top level) and new format (nested in parent)
+    subscription_id = invoice.get("subscription") or (
+        invoice.get("parent", {}).get("subscription_details", {}).get("subscription")
+    )
     
     if not subscription_id:
         logger.info("Invoice has no subscription_id (likely one-time payment)")
@@ -205,7 +208,7 @@ async def _handle_invoice_paid(event, db: AsyncSession, service: SubscriptionSer
         sub.retry_attempt_count = 0
         sub.last_payment_failure_at = None
         db.add(sub)
-        logger.info(f"✅ Subscription {sub.id} payment succeeded on retry - resuming normal billing")
+        logger.info(f"Subscription {sub.id} payment succeeded on retry - resuming normal billing")
     
     # Extend subscription
     await service.extend_subscription(db, sub)
@@ -216,37 +219,50 @@ async def _handle_invoice_paid(event, db: AsyncSession, service: SubscriptionSer
 async def _handle_invoice_payment_failed(event, db: AsyncSession, service: SubscriptionService):
     """Handle invoice.payment_failed - Enter retry period."""
     invoice = event["data"]["object"]
+    # Handle both old format (subscription at top level) and new format (nested in parent)
     subscription_id = invoice.get("subscription")
-    attempt_count = invoice.get("attempt_count", 1)
-    
     if not subscription_id:
-        logger.info("Invoice has no subscription_id")
-        return
+        parent = invoice.get("parent") or {}
+        sub_details = parent.get("subscription_details") or {}
+        subscription_id = sub_details.get("subscription")
     
-    logger.warning(f"Processing invoice.payment_failed for subscription {subscription_id} (attempt {attempt_count})")
+    customer_id = invoice.get("customer")
+    attempt_count = invoice.get("attempt_count", 1)
+    invoice_id = invoice.get("id")
     
-    # Get subscription by stripe_subscription_id
+    # Get subscription by stripe_subscription_id OR stripe_customer_id (fallback)
     from app.models.subscription import Subscription
     from app.utils.datetime_utils import get_current_utc_datetime
     
-    stmt = select(Subscription).where(Subscription.stripe_subscription_id == subscription_id)
+    if subscription_id:
+        logger.info(f"Processing payment failure for subscription {subscription_id} (attempt {attempt_count})")
+        stmt = select(Subscription).where(Subscription.stripe_subscription_id == subscription_id)
+    elif customer_id:
+        logger.warning(f"Invoice {invoice_id} missing subscription_id, using customer_id fallback: {customer_id}")
+        stmt = select(Subscription).where(
+            Subscription.stripe_customer_id == customer_id,
+            Subscription.status == SubscriptionStatus.active
+        ).order_by(Subscription.created_at.desc())
+    else:
+        logger.error(f"Invoice {invoice_id} has neither subscription_id nor customer_id")
+        return
+    
     result = await db.execute(stmt)
     sub = result.scalar_one_or_none()
     
     if not sub:
-        logger.warning(f"Subscription not found for stripe_subscription_id {subscription_id}")
+        logger.error(f"Subscription not found for stripe_subscription_id {subscription_id} or customer_id {customer_id}")
         return
     
     # Enter retry period - user keeps access!
     sub.is_in_retry_period = True
     sub.retry_attempt_count = attempt_count
     sub.last_payment_failure_at = get_current_utc_datetime()
-    # Keep status = active (user retains access during retry period)
     
     db.add(sub)
     await db.commit()
     
-    logger.warning(f"⚠️ User {sub.user_id} payment failed (attempt {attempt_count}/4). Entering retry period - user keeps access until retries exhausted")
+    logger.warning(f"User {sub.user_id} payment failed (attempt {attempt_count}/4). Retry period active - user keeps access until retries exhausted")
 
 
 async def _handle_subscription_updated(event, db: AsyncSession, service: SubscriptionService):
@@ -276,7 +292,7 @@ async def _handle_subscription_updated(event, db: AsyncSession, service: Subscri
         sub.canceled_at = datetime.now(timezone.utc)
         db.add(sub)
         await db.commit()
-        logger.info(f"✅ Subscription {sub.id} cancelled via Stripe Portal - will not renew after {sub.period_end}")
+        logger.info(f"Subscription {sub.id} cancelled via Stripe Portal - will not renew after {sub.period_end}")
     
     # Check if user reactivated subscription
     elif not cancel_at_period_end and not sub.auto_renew and sub.status == SubscriptionStatus.active:
@@ -285,7 +301,7 @@ async def _handle_subscription_updated(event, db: AsyncSession, service: Subscri
         sub.canceled_at = None
         db.add(sub)
         await db.commit()
-        logger.info(f"✅ Subscription {sub.id} reactivated via Stripe Portal - will renew")
+        logger.info(f"Subscription {sub.id} reactivated via Stripe Portal - will renew")
 
 
 async def _handle_subscription_deleted(event, db: AsyncSession, service: SubscriptionService):
@@ -314,7 +330,7 @@ async def _handle_subscription_deleted(event, db: AsyncSession, service: Subscri
     
     if was_in_retry:
         # Retries exhausted - downgrade to Freemium
-        logger.warning(f"🔻 User {sub.user_id} Stripe retries exhausted - downgrading to Freemium")
+        logger.warning(f"User {sub.user_id} Stripe retries exhausted - downgrading to Freemium")
         await service.downgrade_to_freemium(db, sub.user_id, reason="stripe_retries_exhausted")
         logger.info(f"Subscription {sub.id} marked as cancelled after retry exhaustion")
     else:

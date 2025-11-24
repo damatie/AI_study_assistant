@@ -51,11 +51,20 @@ async def send_email(
 
 
 async def send_verification_email(email: str, code: str):
+    from urllib.parse import urlencode
+
     tpl = env.get_template("verification.html")
+    frontend_base = settings.FRONTEND_APP_URL or settings.APP_URL
+    if not frontend_base:
+        raise ValueError("FRONTEND_APP_URL is not configured")
+    verify_url = f"{frontend_base.rstrip('/')}/verify-email?{urlencode({'email': email})}"
     html = tpl.render(
-        code=code, app_name="AI Study Assistant", support_email=settings.FROM_EMAIL
+        code=code,
+        verify_url=verify_url,
+        app_name="AI Study Assistant",
+        support_email=settings.FROM_EMAIL
     )
-    text = f"Your verification code is {code}. It expires in 10 minutes."
+    text = f"Your verification code is {code}. It expires in 10 minutes.\n\nVerify at: {verify_url}"
     await send_email(
         subject="Verify your AI Study Assistant account",
         recipient=email,

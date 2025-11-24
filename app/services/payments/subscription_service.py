@@ -105,7 +105,7 @@ class SubscriptionService:
         
         # Build URLs
         api_base = settings.APP_URL.rstrip('/')
-        frontend_base = (settings.FRONTEND_APP_URL or "http://localhost:3000").rstrip('/')
+        frontend_base = (settings.FRONTEND_APP_URL or settings.APP_URL).rstrip('/')
         
         if not success_url:
             if provider == PaymentProvider.stripe:

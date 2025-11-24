@@ -177,7 +177,7 @@ async def _handle_subscription_create(event, db: AsyncSession, service: Subscrip
     txn.subscription_id = subscription.id
     
     await db.commit()
-    logger.info(f"✅ Subscription created: id={subscription.id}, user_id={txn.user_id}, plan_id={plan_id}, code={subscription_code}")
+    logger.info(f"Subscription created: id={subscription.id}, user_id={txn.user_id}, plan_id={plan_id}, code={subscription_code}")
 
 
 async def _handle_charge_success(event, db: AsyncSession, service: SubscriptionService):
@@ -229,14 +229,14 @@ async def _handle_charge_success(event, db: AsyncSession, service: SubscriptionS
                 sub.retry_attempt_count = 0
                 sub.last_payment_failure_at = None
                 db.add(sub)
-                logger.info(f"✅ Subscription {sub.id} payment succeeded on retry - resuming normal billing")
+                logger.info(f"Subscription {sub.id} payment succeeded on retry - resuming normal billing")
             
             # Extend subscription for renewals (fetch updated dates from Paystack)
             await service.extend_subscription(db, sub)
-            logger.info(f"✅ Subscription {sub.id} extended (recurring payment)")
+            logger.info(f"Subscription {sub.id} extended (recurring payment)")
     
     await db.commit()
-    logger.info(f"✅ Transaction {reference} marked as successful via {txn.channel}")
+    logger.info(f"Transaction {reference} marked as successful via {txn.channel}")
 
 
 async def _handle_charge_failed(event, db: AsyncSession, service: SubscriptionService):
@@ -275,15 +275,15 @@ async def _handle_charge_failed(event, db: AsyncSession, service: SubscriptionSe
         return
     
     # Enter retry period - user keeps access!
+    # Note: Paystack doesn't send attempt_count in webhook, so we increment locally
     sub.is_in_retry_period = True
     sub.retry_attempt_count += 1
     sub.last_payment_failure_at = get_current_utc_datetime()
-    # Keep status = active (user retains access during retry period)
     
     db.add(sub)
     await db.commit()
     
-    logger.warning(f"⚠️ User {sub.user_id} Paystack payment failed (attempt {sub.retry_attempt_count}). Entering retry period - user keeps access. Reason: {gateway_response}")
+    logger.warning(f"User {sub.user_id} Paystack payment failed (attempt {sub.retry_attempt_count}). Retry period active - user keeps access. Reason: {gateway_response}")
 
 
 async def _handle_subscription_not_renew(event, db: AsyncSession, service: SubscriptionService):
@@ -325,7 +325,7 @@ async def _handle_subscription_not_renew(event, db: AsyncSession, service: Subsc
     db.add(sub)
     await db.commit()
     
-    logger.info(f"✅ Subscription {sub.id} marked for cancellation at period end (user_id={sub.user_id}, period_end={sub.period_end})")
+    logger.info(f"Subscription {sub.id} marked for cancellation at period end (user_id={sub.user_id}, period_end={sub.period_end})")
 
 
 async def _handle_subscription_disable(event, db: AsyncSession, service: SubscriptionService):
@@ -354,7 +354,7 @@ async def _handle_subscription_disable(event, db: AsyncSession, service: Subscri
     
     if was_in_retry:
         # Retries exhausted - downgrade to Freemium
-        logger.warning(f"🔻 User {sub.user_id} Paystack retries exhausted - downgrading to Freemium")
+        logger.warning(f"User {sub.user_id} Paystack retries exhausted - downgrading to Freemium")
         await service.downgrade_to_freemium(db, sub.user_id, reason="paystack_retries_exhausted")
         logger.info(f"Subscription {sub.id} marked as cancelled after retry exhaustion")
     else:

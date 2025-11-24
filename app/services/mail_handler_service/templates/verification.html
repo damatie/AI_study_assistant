@@ -57,8 +57,18 @@
         <p style="color: #4b5563; line-height: 1.6; margin-bottom: 20px">
           Thank you for signing up for {{ app_name }}!
         </p>
-        <p style="color: #4b5563; line-height: 1.6; margin-bottom: 30px">
-          Please use the verification code below to confirm your email address:
+        <p style="color: #4b5563; line-height: 1.6; margin-bottom: 20px">
+          Please use the verification code below to confirm your email address.
+        </p>
+        <p
+          style="
+            color: #4b5563;
+            line-height: 1.6;
+            margin-bottom: 30px;
+            font-weight: 500;
+          "
+        >
+          Your verification code is:
         </p>
 
         <div
@@ -83,6 +93,25 @@
             {{ code }}
           </h1>
         </div>
+
+        {% if verify_url %}
+        <div style="text-align: center; margin: 30px 0">
+          <a
+            href="{{ verify_url }}"
+            style="
+              background: #2e2eb8;
+              color: #fff;
+              padding: 14px 32px;
+              border-radius: 6px;
+              text-decoration: none;
+              display: inline-block;
+              font-weight: 600;
+              font-size: 16px;
+            "
+            >Verify Email</a
+          >
+        </div>
+        {% endif %}
 
         <p style="color: #6b7280; font-weight: 500; margin-bottom: 20px">
           ⏰ This verification code will expire in 10 minutes.
