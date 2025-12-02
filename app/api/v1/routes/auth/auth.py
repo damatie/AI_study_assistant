@@ -41,9 +41,11 @@ from app.services.mail_handler_service.mailer import (
     # send_reset_password_email,
 )
 from app.services.mail_handler_service.mailer_resend import (
+    EmailError,
+    get_email_delivery_error_message,
     send_reset_password_email,
     send_verification_email,
-    send_welcome_email
+    send_welcome_email,
 )
 
 
@@ -64,6 +66,15 @@ async def authenticate_user(db: AsyncSession, email: str, password: str):
     if not user or not verify_password(password, user.password_hash):
         return None
     return user
+
+
+def _email_delivery_error_response(action: str, exc: EmailError | None = None):
+    message = getattr(exc, "user_message", None) or get_email_delivery_error_message(action)
+    return error_response(
+        msg=message,
+        data={"error_type": "EMAIL_DELIVERY_FAILED"},
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
 
 
 # Register User
@@ -101,7 +112,10 @@ async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
     await db.refresh(user)
 
     # send the OTP via email to user.email
-    await send_verification_email(user.email, code, user.first_name)
+    try:
+        await send_verification_email(user.email, code, user.first_name)
+    except EmailError as exc:
+        return _email_delivery_error_response("send your verification email", exc)
     
     # Create initial free subscription for new user
     await create_free_subscription(user, db, duration_days=30)
@@ -273,7 +287,10 @@ async def forgot_password(
     await db.commit()
 
     # send `code` via email
-    await send_reset_password_email(user.email, code, user.first_name)
+    try:
+        await send_reset_password_email(user.email, code, user.first_name)
+    except EmailError as exc:
+        return _email_delivery_error_response("send your password reset email", exc)
     return success_response(msg="Password reset code sent", data=None, status_code=200)
 
 
@@ -317,7 +334,10 @@ async def resend_verification(
 
     # 4. Send email
     code = get_totp_code(secret, interval=600)
-    await send_verification_email(user.email, code, user.first_name)
+    try:
+        await send_verification_email(user.email, code, user.first_name)
+    except EmailError as exc:
+        return _email_delivery_error_response("send your verification email", exc)
 
     return success_response(msg="Verification code resent to your email")
 
@@ -340,7 +360,10 @@ async def resend_reset_password(
 
     # 3. Send email
     code = get_totp_code(secret, interval=600)
-    await send_reset_password_email(user.email, code, user.first_name)
+    try:
+        await send_reset_password_email(user.email, code, user.first_name)
+    except EmailError as exc:
+        return _email_delivery_error_response("send your password reset email", exc)
 
     return success_response(msg="Password reset code resent to your email")
 

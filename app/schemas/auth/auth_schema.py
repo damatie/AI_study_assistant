@@ -57,9 +57,9 @@ class UserCreate(BaseModel):
             raise ValueError("Password must include at least one number.")
         if not any(char.isalpha() for char in value):
             raise ValueError("Password must include at least one letter.")
-        if not any(char in "!@#$%^&*()-_+=" for char in value):
+        if not any(char in "!@#$%^&*()[]{}\\;:'\",.<>/?|`~_-+=" for char in value):
             raise ValueError(
-                "Password must include at least one special character (!@#$%^&*()-_+=)."
+                "Password must include at least one special character."
             )
         return value
 
@@ -164,9 +164,9 @@ class ResetPasswordRequest(BaseModel):
             raise ValueError("Password must include at least one number.")
         if not any(char.isalpha() for char in value):
             raise ValueError("Password must include at least one letter.")
-        if not any(char in "!@#$%^&*()-_+=" for char in value):
+        if not any(char in "!@#$%^&*()[]{}\\;:'\",.<>/?|`~_-+=" for char in value):
             raise ValueError(
-                "Password must include at least one special character (!@#$%^&*()-_+=)."
+                "Password must include at least one special character."
             )
         return value
 
@@ -211,8 +211,8 @@ class UpdatePasswordRequest(BaseModel):
             raise ValueError("Password must include at least one number.")
         if not any(char.isalpha() for char in value):
             raise ValueError("Password must include at least one letter.")
-        if not any(char in "!@#$%^&*()-_+=" for char in value):
+        if not any(char in "!@#$%^&*()[]{}\\;:'\",.<>/?|`~_-+=" for char in value):
             raise ValueError(
-                "Password must include at least one special character (!@#$%^&*()-_+=)."
+                "Password must include at least one special character."
             )
         return value
