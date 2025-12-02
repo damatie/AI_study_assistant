@@ -134,7 +134,7 @@ async def send_verification_email(email: str, code: str, name:str) -> Dict[str, 
             name=name,
             verify_url=verify_url,
             app_name="knoledg",
-            support_email=settings.RESEND_FROM_EMAIL,
+            support_email=settings.SUPPORT_EMAIL,
             logo_url=settings.LOGO
         )
         
@@ -148,7 +148,7 @@ This code expires in 10 minutes. If you didn't request this verification, please
 
 Verify here: {verify_url}
 
-Need help? Contact us at {settings.RESEND_FROM_EMAIL}
+Need help? Contact us at {settings.SUPPORT_EMAIL}
         """.strip()
         
         return await send_email(
@@ -181,7 +181,7 @@ async def send_reset_password_email(email: str, code: str, name: str) -> Dict[st
             code=code,
             name=name,
             app_name="knoledg",
-            support_email=settings.RESEND_FROM_EMAIL, 
+            support_email=settings.SUPPORT_EMAIL,
             logo_url=settings.LOGO
         )
         
@@ -193,7 +193,7 @@ Your password reset code is: {code}
 
 This code expires in 10 minutes. If you didn't request a password reset, please ignore this email and your password will remain unchanged.
 
-Need help? Contact us at {settings.RESEND_FROM_EMAIL}
+Need help? Contact us at {settings.SUPPORT_EMAIL}
         """.strip()
         
         return await send_email(
@@ -217,8 +217,8 @@ async def send_welcome_email(email: str, name: str) -> Dict[str, Any]:
         html = tpl.render(
             name=name,
             app_name="knoledg",
-            support_email=settings.RESEND_FROM_EMAIL,
-             logo_url=settings.LOGO
+            support_email=settings.SUPPORT_EMAIL,
+            logo_url=settings.LOGO
         )
         
         text = f"""
@@ -228,7 +228,7 @@ Thank you for signing up. We're excited to help you with your studies.
 
 Get started by logging into your account and exploring our features.
 
-Need help? Contact us at {settings.RESEND_FROM_EMAIL}
+Need help? Contact us at {settings.SUPPORT_EMAIL}
         """.strip()
         
         return await send_email(

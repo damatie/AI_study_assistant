@@ -33,7 +33,7 @@ def _base_context(extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     base = {
         "app_name": APP_NAME,
         "logo_url": settings.LOGO,
-        "support_email": settings.RESEND_FROM_EMAIL,
+        "support_email": settings.SUPPORT_EMAIL,
     }
     if extra:
         base.update(extra)

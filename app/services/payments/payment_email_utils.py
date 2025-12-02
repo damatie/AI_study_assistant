@@ -58,7 +58,7 @@ def build_billing_dashboard_url() -> Optional[str]:
     base = settings.FRONTEND_APP_URL or settings.APP_URL
     if not base:
         return None
-    return f"{base.rstrip('/')}/dashboard/settings/billing"
+    return f"{base.rstrip('/')}/dashboard/settings"
 
 
 def user_display_name(user: Optional[User]) -> str:
