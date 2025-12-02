@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ app_name }} • Cancellation confirmed</title>
+    <style>
+      body {
+        font-family: "Inter", -apple-system, "Segoe UI", sans-serif;
+        background: #fff7ed;
+        margin: 0;
+        padding: 0;
+        color: #1f2937;
+      }
+      .wrapper {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 32px 20px;
+      }
+      .card {
+        background: #ffffff;
+        border-radius: 24px;
+        padding: 36px;
+        border: 1px solid #fed7aa;
+      }
+      .eyebrow {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.22em;
+        color: #c2410c;
+      }
+      .btn {
+        display: inline-block;
+        margin-top: 24px;
+        padding: 12px 24px;
+        border-radius: 999px;
+        background: #c2410c;
+        color: #fff !important;
+        text-decoration: none;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrapper">
+      <div class="card">
+        <p class="eyebrow">Cancellation scheduled</p>
+        <h1 style="margin: 14px 0 10px; font-size: 26px">
+          Your {{ plan_name }} plan will end on {{ effective_date }}.
+        </h1>
+        <p style="color: #4b5563; line-height: 1.6">
+          You'll keep full access until the date above. After that, your study
+          space reverts to the Freemium tier unless you reactivate.
+        </p>
+        <p style="color: #4b5563; line-height: 1.6">
+          If this was unexpected, you can instantly resume billing — no data is
+          lost in your study space.
+        </p>
+        {% if reactivate_url %}
+        <a class="btn" href="{{ reactivate_url }}">Reactivate now</a>
+        {% endif %}
+        <p style="font-size: 13px; color: #9ca3af; margin-top: 20px">
+          Need help? Reach us at {{ support_email }}.
+        </p>
+      </div>
+    </div>
+  </body>
+</html>

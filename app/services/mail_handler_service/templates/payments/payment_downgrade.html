@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ app_name }} • Plan changed</title>
+    <style>
+      body {
+        font-family: "Inter", -apple-system, "Segoe UI", sans-serif;
+        background: #f8fafc;
+        margin: 0;
+        padding: 0;
+        color: #0f172a;
+      }
+      .wrapper {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 32px 20px;
+      }
+      .card {
+        background: #ffffff;
+        border-radius: 24px;
+        padding: 36px;
+        border: 1px solid #e2e8f0;
+      }
+      .badge {
+        display: inline-flex;
+        padding: 4px 14px;
+        border-radius: 999px;
+        background: #e0f2fe;
+        color: #0369a1;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.22em;
+      }
+      .limits {
+        margin: 24px 0;
+        padding: 16px;
+        border-radius: 16px;
+        background: #f1f5f9;
+        color: #475569;
+      }
+      .btn {
+        display: inline-block;
+        margin-top: 24px;
+        padding: 12px 24px;
+        border-radius: 999px;
+        background: #0f172a;
+        color: #fff !important;
+        text-decoration: none;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrapper">
+      <div class="card">
+        <span class="badge">Subscription update</span>
+        <h1 style="margin: 18px 0 10px; font-size: 26px">
+          We moved you to the Freemium plan on {{ downgrade_date }}.
+        </h1>
+        <p style="color: #475569; line-height: 1.6">
+          Multiple payment attempts for the {{ plan_name }} plan did not
+          succeed, so your study space now runs on our free tier while you
+          decide what to do next.
+        </p>
+        <div class="limits">
+          <strong>What changes?</strong>
+          <p style="margin: 8px 0 0">{{ plan_limit_summary }}</p>
+        </div>
+        {% if reactivate_url %}
+        <a class="btn" href="{{ reactivate_url }}">Reactivate subscription</a>
+        {% endif %}
+        <p style="font-size: 13px; color: #94a3b8; margin-top: 20px">
+          We’d love to help you get back on track. Email {{ support_email }} for
+          billing assistance.
+        </p>
+      </div>
+    </div>
+  </body>
+</html>

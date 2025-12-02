@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import stripe
 from fastapi import APIRouter, Depends, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.response import success_response, ResponseModel
@@ -12,12 +15,28 @@ from app.core.logging_config import get_logger
 from app.db.deps import get_db
 from app.models.user import User
 from app.models.transaction import Transaction
-from app.utils.enums import TransactionStatus, PaymentProvider, TransactionStatusReason, SubscriptionStatus
+from app.models.plan import Plan
+from app.utils.enums import (
+    TransactionStatus,
+    PaymentProvider,
+    TransactionStatusReason,
+    SubscriptionStatus,
+)
+from app.services.mail_handler_service import payment_notifications
+from app.services.mail_handler_service.mailer_resend import EmailError
+from app.services.payments.payment_email_utils import (
+    build_billing_dashboard_url,
+    format_amount_minor,
+    format_period,
+    user_display_name,
+)
 from app.services.payments.subscription_service import SubscriptionService
-from sqlalchemy import select
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/payments/stripe", tags=["webhooks"])
+
+BILLING_DASHBOARD_URL = build_billing_dashboard_url()
+MAX_STRIPE_RETRY_ATTEMPTS = 4
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -140,7 +159,6 @@ async def _handle_checkout_completed(event, db: AsyncSession, service: Subscript
         period_end_unix = first_item['current_period_end']
         
         # Convert Unix timestamps to ISO format strings (service expects ISO strings)
-        from datetime import datetime, timezone
         period_start_dt = datetime.fromtimestamp(period_start_unix, tz=timezone.utc)
         period_end_dt = datetime.fromtimestamp(period_end_unix, tz=timezone.utc)
         period_start_str = period_start_dt.isoformat()
@@ -170,6 +188,29 @@ async def _handle_checkout_completed(event, db: AsyncSession, service: Subscript
     
     await db.commit()
     logger.info(f"Subscription activated: subscription_id={subscription.id}, user_id={txn.user_id}, plan_id={plan_id}")
+
+    # Send confirmation email
+    user = await db.get(User, txn.user_id)
+    plan = await db.get(Plan, subscription.plan_id)
+    amount_minor = session.get("amount_total") or txn.amount_pence
+    currency = session.get("currency") or txn.currency
+
+    if user:
+        try:
+            await payment_notifications.send_payment_success_email(
+                email=user.email,
+                name=user_display_name(user),
+                plan_name=plan.name if plan else metadata.get("plan_name", "Your plan"),
+                billing_interval=billing_interval,
+                amount=format_amount_minor(amount_minor, currency),
+                currency=(currency or "").upper(),
+                period_start=format_period(period_start_str),
+                period_end=format_period(period_end_str),
+                manage_url=BILLING_DASHBOARD_URL,
+                provider="stripe",
+            )
+        except EmailError as exc:
+            logger.error("Failed to send Stripe payment success email for user %s: %s", user.id, exc)
 
 
 async def _handle_invoice_paid(event, db: AsyncSession, service: SubscriptionService):
@@ -203,7 +244,8 @@ async def _handle_invoice_paid(event, db: AsyncSession, service: SubscriptionSer
         return
     
     # Check if this was a successful retry (exit retry period)
-    if sub.is_in_retry_period:
+    was_retry = sub.is_in_retry_period
+    if was_retry:
         sub.is_in_retry_period = False
         sub.retry_attempt_count = 0
         sub.last_payment_failure_at = None
@@ -211,9 +253,45 @@ async def _handle_invoice_paid(event, db: AsyncSession, service: SubscriptionSer
         logger.info(f"Subscription {sub.id} payment succeeded on retry - resuming normal billing")
     
     # Extend subscription
-    await service.extend_subscription(db, sub)
+    updated_sub = await service.extend_subscription(db, sub)
     await db.commit()
     logger.info(f"Subscription {sub.id} extended (recurring payment)")
+
+    # Notify user
+    user = await db.get(User, sub.user_id)
+    plan = await db.get(Plan, sub.plan_id)
+    amount_minor = invoice.get("amount_paid") or invoice.get("amount_due")
+    currency = invoice.get("currency")
+    billing_interval = updated_sub.billing_interval.value
+    period_start = format_period(updated_sub.period_start)
+    period_end = format_period(updated_sub.period_end)
+
+    if user:
+        try:
+            if was_retry:
+                await payment_notifications.send_retry_success_email(
+                    email=user.email,
+                    name=user_display_name(user),
+                    plan_name=plan.name if plan else "Your plan",
+                    period_end=period_end,
+                    manage_url=BILLING_DASHBOARD_URL,
+                    provider="stripe",
+                )
+            else:
+                await payment_notifications.send_payment_success_email(
+                    email=user.email,
+                    name=user_display_name(user),
+                    plan_name=plan.name if plan else "Your plan",
+                    billing_interval=billing_interval,
+                    amount=format_amount_minor(amount_minor, currency),
+                    currency=(currency or "").upper(),
+                    period_start=period_start,
+                    period_end=period_end,
+                    manage_url=BILLING_DASHBOARD_URL,
+                    provider="stripe",
+                )
+        except EmailError as exc:
+            logger.error("Failed to send Stripe renewal email for subscription %s: %s", sub.id, exc)
 
 
 async def _handle_invoice_payment_failed(event, db: AsyncSession, service: SubscriptionService):
@@ -264,6 +342,30 @@ async def _handle_invoice_payment_failed(event, db: AsyncSession, service: Subsc
     
     logger.warning(f"User {sub.user_id} payment failed (attempt {attempt_count}/4). Retry period active - user keeps access until retries exhausted")
 
+    user = await db.get(User, sub.user_id)
+    plan = await db.get(Plan, sub.plan_id)
+    next_payment_attempt = invoice.get("next_payment_attempt")
+    if next_payment_attempt:
+        next_retry_date = format_period(datetime.fromtimestamp(next_payment_attempt, tz=timezone.utc))
+    else:
+        next_retry_date = "soon"
+    update_payment_url = BILLING_DASHBOARD_URL
+    if user:
+        try:
+            await payment_notifications.send_payment_failure_email(
+                email=user.email,
+                name=user_display_name(user),
+                plan_name=plan.name if plan else "Your plan",
+                billing_interval=sub.billing_interval.value,
+                attempt_number=attempt_count,
+                max_attempts=MAX_STRIPE_RETRY_ATTEMPTS,
+                next_retry_date=next_retry_date,
+                update_payment_url=update_payment_url,
+                provider="stripe",
+            )
+        except EmailError as exc:
+            logger.error("Failed to send Stripe payment failure email for subscription %s: %s", sub.id, exc)
+
 
 async def _handle_subscription_updated(event, db: AsyncSession, service: SubscriptionService):
     """Handle customer.subscription.updated - Detect cancellations via Stripe Portal."""
@@ -293,6 +395,20 @@ async def _handle_subscription_updated(event, db: AsyncSession, service: Subscri
         db.add(sub)
         await db.commit()
         logger.info(f"Subscription {sub.id} cancelled via Stripe Portal - will not renew after {sub.period_end}")
+        user = await db.get(User, sub.user_id)
+        plan = await db.get(Plan, sub.plan_id)
+        if user:
+            try:
+                await payment_notifications.send_cancellation_email(
+                    email=user.email,
+                    name=user_display_name(user),
+                    plan_name=plan.name if plan else "Your plan",
+                    effective_date=format_period(sub.period_end),
+                    reactivate_url=BILLING_DASHBOARD_URL,
+                    provider="stripe",
+                )
+            except EmailError as exc:
+                logger.error("Failed to send Stripe cancellation email for subscription %s: %s", sub.id, exc)
     
     # Check if user reactivated subscription
     elif not cancel_at_period_end and not sub.auto_renew and sub.status == SubscriptionStatus.active:
@@ -340,3 +456,17 @@ async def _handle_subscription_deleted(event, db: AsyncSession, service: Subscri
         db.add(sub)
         await db.commit()
         logger.info(f"Subscription {sub.id} marked as cancelled (user-initiated)")
+        user = await db.get(User, sub.user_id)
+        plan = await db.get(Plan, sub.plan_id)
+        if user:
+            try:
+                await payment_notifications.send_cancellation_email(
+                    email=user.email,
+                    name=user_display_name(user),
+                    plan_name=plan.name if plan else "Your plan",
+                    effective_date=format_period(sub.period_end),
+                    reactivate_url=BILLING_DASHBOARD_URL,
+                    provider="stripe",
+                )
+            except EmailError as exc:
+                logger.error("Failed to send Stripe cancellation email for subscription %s: %s", sub.id, exc)

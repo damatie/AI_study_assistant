@@ -24,10 +24,19 @@ from app.utils.enums import (
     TransactionStatus,
     TransactionStatusReason,
 )
+from app.services.mail_handler_service import payment_notifications
+from app.services.mail_handler_service.mailer_resend import EmailError
+from app.services.payments.payment_email_utils import (
+    build_billing_dashboard_url,
+    format_period,
+    describe_plan_limits,
+    user_display_name,
+)
 from app.services.payments.stripe_client import StripeClient
 from app.services.payments.paystack_client import PaystackClient
 
 logger = get_logger(__name__)
+BILLING_DASHBOARD_URL = build_billing_dashboard_url()
 
 
 class SubscriptionService:
@@ -482,6 +491,9 @@ class SubscriptionService:
         if not subscription:
             raise ValueError("No active subscription found")
         
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalars().first()
+        
         # Cancel via provider API
         if subscription.stripe_subscription_id:
             try:
@@ -519,8 +531,6 @@ class SubscriptionService:
             subscription.period_end = now
             
             # Downgrade user to Freemium
-            user_result = await db.execute(select(User).where(User.id == user_id))
-            user = user_result.scalars().first()
             if user:
                 plan_result = await db.execute(select(Plan).where(Plan.sku == "FREEMIUM"))
                 free_plan = plan_result.scalars().first()
@@ -534,6 +544,21 @@ class SubscriptionService:
         
         cancel_type = "immediately" if immediate else "at period end"
         logger.info(f"Subscription cancelled {cancel_type}: id={subscription.id}, user={user_id}")
+        plan_result = await db.execute(select(Plan).where(Plan.id == subscription.plan_id))
+        plan = plan_result.scalars().first()
+        provider_label = "stripe" if subscription.stripe_subscription_id else "paystack" if subscription.paystack_subscription_code else "unknown"
+        if user:
+            try:
+                await payment_notifications.send_cancellation_email(
+                    email=user.email,
+                    name=user_display_name(user),
+                    plan_name=plan.name if plan else "Your plan",
+                    effective_date=format_period(subscription.period_end),
+                    reactivate_url=BILLING_DASHBOARD_URL,
+                    provider=provider_label,
+                )
+            except EmailError as exc:
+                logger.error("Failed to send cancellation email for subscription %s: %s", subscription.id, exc)
         
         return subscription
     
@@ -566,12 +591,15 @@ class SubscriptionService:
         old_subscription = result.scalars().first()
         
         # 2. Mark old subscription as cancelled and exit retry period
+        old_plan = None
         if old_subscription:
             old_subscription.status = SubscriptionStatus.cancelled
             old_subscription.is_in_retry_period = False
             old_subscription.auto_renew = False
             db.add(old_subscription)
             logger.info(f"Cancelled old subscription {old_subscription.id}")
+            plan_lookup = await db.execute(select(Plan).where(Plan.id == old_subscription.plan_id))
+            old_plan = plan_lookup.scalars().first()
         
         # 3. Get Freemium plan
         plan_result = await db.execute(select(Plan).where(Plan.sku == "FREEMIUM"))
@@ -608,6 +636,20 @@ class SubscriptionService:
         await db.refresh(new_subscription)
         
         logger.info(f"✅ User {user_id} downgraded to Freemium. New subscription: {new_subscription.id}, expires: {period_end}")
+        user = user or (await db.execute(select(User).where(User.id == user_id))).scalars().first()
+        if user:
+            try:
+                await payment_notifications.send_downgrade_email(
+                    email=user.email,
+                    name=user_display_name(user),
+                    plan_name=old_plan.name if old_plan else "Your previous plan",
+                    downgrade_date=format_period(now),
+                    plan_limit_summary=describe_plan_limits(freemium_plan),
+                    reactivate_url=BILLING_DASHBOARD_URL,
+                    provider="stripe" if old_subscription and old_subscription.stripe_subscription_id else "paystack" if old_subscription and old_subscription.paystack_subscription_code else "unknown",
+                )
+            except EmailError as exc:
+                logger.error("Failed to send downgrade email for user %s: %s", user_id, exc)
         
         return new_subscription
     
