@@ -17,7 +17,19 @@ resend.api_key = settings.RESEND_API_KEY
 
 class EmailError(Exception):
     """Custom exception for email sending errors"""
-    pass
+
+    def __init__(self, message: str, user_message: Optional[str] = None):
+        super().__init__(message)
+        self.user_message = user_message
+
+
+def get_email_delivery_error_message(action: str) -> str:
+    """Construct a reusable user-facing message using configured support contact."""
+    support_email = settings.RESEND_FROM_EMAIL
+    return (
+        f"We couldn't {action} right now. Please try again shortly "
+        f"or contact {support_email}."
+    )
 
 
 async def send_email(
@@ -31,7 +43,7 @@ async def send_email(
     cc: Optional[Union[str, List[str]]] = None,
     bcc: Optional[Union[str, List[str]]] = None,
     headers: Optional[Dict[str, str]] = None,
-    tags: Optional[Dict[str, str]] = None,
+    tags: Optional[Union[Dict[str, str], List[Dict[str, str]]]] = None,
 ) -> Dict[str, Any]:
     """
     Send an email via Resend API using the official SDK.
@@ -86,7 +98,14 @@ async def send_email(
         params["headers"] = headers
         
     if tags:
-        params["tags"] = tags
+        # Resend expects a list of {"name": str, "value": str}
+        if isinstance(tags, dict):
+            params["tags"] = [
+                {"name": str(key), "value": str(value)}
+                for key, value in tags.items()
+            ]
+        else:
+            params["tags"] = tags
     
     try:
         # Send email using the official Resend SDK
@@ -99,13 +118,20 @@ async def send_email(
         return response
         
     except Exception as e:
+        user_message = get_email_delivery_error_message("send emails")
         # Handle various types of errors
         if hasattr(e, 'status_code'):
             # HTTP error from Resend API
-            raise EmailError(f"Resend API error ({e.status_code}): {str(e)}")
+            raise EmailError(
+                f"Resend API error ({e.status_code}): {str(e)}",
+                user_message=user_message,
+            )
         else:
             # Other errors (network, validation, etc.)
-            raise EmailError(f"Failed to send email: {str(e)}")
+            raise EmailError(
+                f"Failed to send email: {str(e)}",
+                user_message=user_message,
+            )
 
 
 async def send_verification_email(email: str, code: str, name:str) -> Dict[str, Any]:
@@ -160,7 +186,11 @@ Need help? Contact us at {settings.RESEND_FROM_EMAIL}
         )
         
     except Exception as e:
-        raise EmailError(f"Failed to send verification email to {email}: {str(e)}")
+        user_message = get_email_delivery_error_message("send your verification email")
+        raise EmailError(
+            f"Failed to send verification email to {email}: {str(e)}",
+            user_message=user_message,
+        )
 
 
 async def send_reset_password_email(email: str, code: str, name: str) -> Dict[str, Any]:
@@ -205,7 +235,11 @@ Need help? Contact us at {settings.RESEND_FROM_EMAIL}
         )
         
     except Exception as e:
-        raise EmailError(f"Failed to send password reset email to {email}: {str(e)}")
+        user_message = get_email_delivery_error_message("send your password reset email")
+        raise EmailError(
+            f"Failed to send password reset email to {email}: {str(e)}",
+            user_message=user_message,
+        )
 
 
 # Additional utility functions
@@ -240,7 +274,11 @@ Need help? Contact us at {settings.RESEND_FROM_EMAIL}
         )
         
     except Exception as e:
-        raise EmailError(f"Failed to send welcome email to {email}: {str(e)}")
+        user_message = get_email_delivery_error_message("send your welcome email")
+        raise EmailError(
+            f"Failed to send welcome email to {email}: {str(e)}",
+            user_message=user_message,
+        )
 
 
 async def send_notification_email(
@@ -260,4 +298,8 @@ async def send_notification_email(
         )
         
     except Exception as e:
-        raise EmailError(f"Failed to send notification email to {email}: {str(e)}")
+        user_message = get_email_delivery_error_message("send your notification email")
+        raise EmailError(
+            f"Failed to send notification email to {email}: {str(e)}",
+            user_message=user_message,
+        )
