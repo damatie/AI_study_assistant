@@ -340,7 +340,32 @@ async def _handle_invoice_payment_failed(event, db: AsyncSession, service: Subsc
     db.add(sub)
     await db.commit()
     
-    logger.warning(f"User {sub.user_id} payment failed (attempt {attempt_count}/4). Retry period active - user keeps access until retries exhausted")
+    # Safety mechanism: If retry attempts exceed threshold, cancel subscription at provider
+    # This prevents subscriptions from getting stuck in retry limbo
+    MAX_RETRY_THRESHOLD = 3
+    if attempt_count > MAX_RETRY_THRESHOLD:
+        logger.warning(
+            f"Retry threshold exceeded for subscription {sub.id} "
+            f"(attempt {attempt_count}/{MAX_RETRY_THRESHOLD}). "
+            f"Cancelling subscription at Stripe to trigger downgrade."
+        )
+        
+        try:
+            # Cancel immediately at Stripe - this will trigger customer.subscription.deleted webhook
+            # which handles the downgrade to Freemium
+            service.stripe_client.cancel_subscription(
+                subscription_id,
+                at_period_end=False  # Cancel immediately
+            )
+            logger.info(f"Successfully cancelled Stripe subscription {subscription_id} after {attempt_count} failed attempts")
+        except Exception as e:
+            logger.error(f"Failed to cancel Stripe subscription {subscription_id}: {e}")
+            # Don't raise - we've already updated the retry count
+        
+        # Return early - the cancellation webhook will handle the rest
+        return
+    
+    logger.warning(f"User {sub.user_id} payment failed (attempt {attempt_count}/{MAX_STRIPE_RETRY_ATTEMPTS}). Retry period active - user keeps access until retries exhausted")
 
     user = await db.get(User, sub.user_id)
     plan = await db.get(Plan, sub.plan_id)

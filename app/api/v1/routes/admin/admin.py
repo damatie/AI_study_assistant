@@ -208,9 +208,7 @@ async def get_admin_metrics(db: AsyncSession = Depends(get_db)):
         entity_id=Subscription.id,
         start_at=window_start,
         extra_filters=[
-            Subscription.status.in_(
-                [SubscriptionStatus.cancelled, SubscriptionStatus.expired]
-            )
+            Subscription.status == SubscriptionStatus.cancelled  # Only count actual cancellations
         ],
     )
 
