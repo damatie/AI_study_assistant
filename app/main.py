@@ -117,5 +117,6 @@ if __name__ == "__main__":
         app, 
         host=settings.HOST, 
         port=settings.PORT,
-        reload=settings.DEBUG
+        reload=settings.DEBUG,
+        timeout_keep_alive=120  # Prevent timeouts on long-running requests (material upload, AI processing)
     )

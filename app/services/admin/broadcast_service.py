@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -142,7 +143,12 @@ class BroadcastService:
         content: PreparedBroadcastContent,
         tags: Dict[str, str],
     ) -> None:
-        for recipient in recipients:
+        """Send emails to a batch of recipients with rate limiting.
+        
+        Resend API limit: 2 requests per second.
+        Adds 500ms delay between emails to stay within limits.
+        """
+        for i, recipient in enumerate(recipients):
             personalized_html, personalized_text = self._personalize_content(
                 recipient, content
             )
@@ -153,6 +159,11 @@ class BroadcastService:
                 text_content=personalized_text,
                 tags=tags,
             )
+            
+            # Rate limiting: Resend allows 2 requests/second
+            # Add 500ms delay after each email (except the last one)
+            if i < len(recipients) - 1:
+                await asyncio.sleep(0.5)
 
     async def _resolve_recipients(self, audience: BroadcastAudience) -> List[str]:
         if audience.type == BroadcastAudienceType.custom:
