@@ -7,6 +7,7 @@ import hmac
 
 from fastapi import APIRouter, Depends, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, or_
 
 from app.core.config import settings
 from app.core.response import success_response, ResponseModel
@@ -14,12 +15,28 @@ from app.core.logging_config import get_logger
 from app.db.deps import get_db
 from app.models.user import User
 from app.models.transaction import Transaction
-from app.utils.enums import TransactionStatus, PaymentProvider, TransactionStatusReason, SubscriptionStatus
+from app.models.plan import Plan
+from app.utils.enums import (
+    TransactionStatus,
+    PaymentProvider,
+    TransactionStatusReason,
+    SubscriptionStatus,
+)
+from app.services.mail_handler_service import payment_notifications
+from app.services.mail_handler_service.mailer_resend import EmailError
+from app.services.payments.payment_email_utils import (
+    build_billing_dashboard_url,
+    format_amount_minor,
+    format_period,
+    user_display_name,
+)
 from app.services.payments.subscription_service import SubscriptionService
-from sqlalchemy import select, or_
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/payments/paystack", tags=["webhooks"])
+
+BILLING_DASHBOARD_URL = build_billing_dashboard_url()
+MAX_PAYSTACK_RETRY_ATTEMPTS = 4
 
 
 @router.post("/webhook", response_model=ResponseModel)
@@ -179,6 +196,25 @@ async def _handle_subscription_create(event, db: AsyncSession, service: Subscrip
     await db.commit()
     logger.info(f"Subscription created: id={subscription.id}, user_id={txn.user_id}, plan_id={plan_id}, code={subscription_code}")
 
+    user = await db.get(User, txn.user_id)
+    plan = await db.get(Plan, plan_id)
+    if user:
+        try:
+            await payment_notifications.send_payment_success_email(
+                email=user.email,
+                name=user_display_name(user),
+                plan_name=plan.name if plan else "Your plan",
+                billing_interval=billing_interval,
+                amount=format_amount_minor(txn.amount_pence, txn.currency),
+                currency=(txn.currency or "").upper(),
+                period_start=format_period(created_at),
+                period_end=format_period(next_payment_date),
+                manage_url=BILLING_DASHBOARD_URL,
+                provider="paystack",
+            )
+        except EmailError as exc:
+            logger.error("Failed to send Paystack payment success email for user %s: %s", user.id, exc)
+
 
 async def _handle_charge_success(event, db: AsyncSession, service: SubscriptionService):
     """
@@ -223,8 +259,9 @@ async def _handle_charge_success(event, db: AsyncSession, service: SubscriptionS
         sub = sub_result.scalar_one_or_none()
         
         if sub:
+            was_retry = sub.is_in_retry_period
             # Handle successful retry
-            if sub.is_in_retry_period:
+            if was_retry:
                 sub.is_in_retry_period = False
                 sub.retry_attempt_count = 0
                 sub.last_payment_failure_at = None
@@ -232,8 +269,41 @@ async def _handle_charge_success(event, db: AsyncSession, service: SubscriptionS
                 logger.info(f"Subscription {sub.id} payment succeeded on retry - resuming normal billing")
             
             # Extend subscription for renewals (fetch updated dates from Paystack)
-            await service.extend_subscription(db, sub)
+            updated_sub = await service.extend_subscription(db, sub)
             logger.info(f"Subscription {sub.id} extended (recurring payment)")
+
+            user = await db.get(User, sub.user_id)
+            plan = await db.get(Plan, sub.plan_id)
+            amount_minor = data.get("amount")
+            currency = data.get("currency") or txn.currency
+            period_end = format_period(updated_sub.period_end)
+            period_start = format_period(updated_sub.period_start)
+            if user:
+                try:
+                    if was_retry:
+                        await payment_notifications.send_retry_success_email(
+                            email=user.email,
+                            name=user_display_name(user),
+                            plan_name=plan.name if plan else "Your plan",
+                            period_end=period_end,
+                            manage_url=BILLING_DASHBOARD_URL,
+                            provider="paystack",
+                        )
+                    else:
+                        await payment_notifications.send_payment_success_email(
+                            email=user.email,
+                            name=user_display_name(user),
+                            plan_name=plan.name if plan else "Your plan",
+                            billing_interval=updated_sub.billing_interval.value,
+                            amount=format_amount_minor(amount_minor, currency),
+                            currency=(currency or "").upper(),
+                            period_start=period_start,
+                            period_end=period_end,
+                            manage_url=BILLING_DASHBOARD_URL,
+                            provider="paystack",
+                        )
+                except EmailError as exc:
+                    logger.error("Failed to send Paystack renewal email for subscription %s: %s", sub.id, exc)
     
     await db.commit()
     logger.info(f"Transaction {reference} marked as successful via {txn.channel}")
@@ -285,6 +355,25 @@ async def _handle_charge_failed(event, db: AsyncSession, service: SubscriptionSe
     
     logger.warning(f"User {sub.user_id} Paystack payment failed (attempt {sub.retry_attempt_count}). Retry period active - user keeps access. Reason: {gateway_response}")
 
+    user = await db.get(User, sub.user_id)
+    plan = await db.get(Plan, sub.plan_id)
+    next_retry_date = data.get("next_payment_date") or "soon"
+    if user:
+        try:
+            await payment_notifications.send_payment_failure_email(
+                email=user.email,
+                name=user_display_name(user),
+                plan_name=plan.name if plan else "Your plan",
+                billing_interval=sub.billing_interval.value,
+                attempt_number=sub.retry_attempt_count,
+                max_attempts=MAX_PAYSTACK_RETRY_ATTEMPTS,
+                next_retry_date=next_retry_date if next_retry_date == "soon" else format_period(next_retry_date),
+                update_payment_url=BILLING_DASHBOARD_URL,
+                provider="paystack",
+            )
+        except EmailError as exc:
+            logger.error("Failed to send Paystack payment failure email for subscription %s: %s", sub.id, exc)
+
 
 async def _handle_subscription_not_renew(event, db: AsyncSession, service: SubscriptionService):
     """
@@ -326,6 +415,20 @@ async def _handle_subscription_not_renew(event, db: AsyncSession, service: Subsc
     await db.commit()
     
     logger.info(f"Subscription {sub.id} marked for cancellation at period end (user_id={sub.user_id}, period_end={sub.period_end})")
+    user = await db.get(User, sub.user_id)
+    plan = await db.get(Plan, sub.plan_id)
+    if user:
+        try:
+            await payment_notifications.send_cancellation_email(
+                email=user.email,
+                name=user_display_name(user),
+                plan_name=plan.name if plan else "Your plan",
+                effective_date=format_period(sub.period_end),
+                reactivate_url=BILLING_DASHBOARD_URL,
+                provider="paystack",
+            )
+        except EmailError as exc:
+            logger.error("Failed to send Paystack cancellation email for subscription %s: %s", sub.id, exc)
 
 
 async def _handle_subscription_disable(event, db: AsyncSession, service: SubscriptionService):
@@ -364,3 +467,17 @@ async def _handle_subscription_disable(event, db: AsyncSession, service: Subscri
         db.add(sub)
         await db.commit()
         logger.info(f"Subscription {sub.id} marked as cancelled (user-initiated)")
+        user = await db.get(User, sub.user_id)
+        plan = await db.get(Plan, sub.plan_id)
+        if user:
+            try:
+                await payment_notifications.send_cancellation_email(
+                    email=user.email,
+                    name=user_display_name(user),
+                    plan_name=plan.name if plan else "Your plan",
+                    effective_date=format_period(sub.period_end),
+                    reactivate_url=BILLING_DASHBOARD_URL,
+                    provider="paystack",
+                )
+            except EmailError as exc:
+                logger.error("Failed to send Paystack cancellation email for subscription %s: %s", sub.id, exc)

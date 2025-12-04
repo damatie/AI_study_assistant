@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ app_name }} • Billing caught up</title>
+    <style>
+      body {
+        font-family: "Inter", -apple-system, "Segoe UI", sans-serif;
+        background: #f5f5ff;
+        margin: 0;
+        padding: 0;
+        color: #111827;
+      }
+      .wrapper {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 32px 20px;
+      }
+      .card {
+        background: #ffffff;
+        border-radius: 20px;
+        padding: 32px;
+        box-shadow: 0 12px 32px rgba(79, 70, 229, 0.12);
+      }
+      .eyebrow {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.24em;
+        color: #6366f1;
+      }
+      .btn {
+        display: inline-block;
+        margin-top: 24px;
+        padding: 12px 24px;
+        border-radius: 999px;
+        background: #455ade;
+        color: #fff !important;
+        text-decoration: none;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrapper">
+      <div class="card">
+        <p class="eyebrow">Back on track</p>
+        <h1 style="margin: 12px 0 8px; font-size: 24px">
+          Payment received — your {{ plan_name }} plan stays active.
+        </h1>
+        <p style="color: #4b5563; line-height: 1.6">
+          Thanks for updating your details, {{ name }}. We successfully
+          processed the latest charge and extended coverage through
+          <strong>{{ period_end }}</strong>.
+        </p>
+        {% if manage_url %}
+        <a class="btn" href="{{ manage_url }}">Open billing portal</a>
+        {% endif %}
+        <p style="font-size: 13px; color: #9ca3af; margin-top: 24px">
+          We’ll keep your access uninterrupted. Contact {{ support_email }} if
+          you still need help.
+        </p>
+      </div>
+    </div>
+  </body>
+</html>
