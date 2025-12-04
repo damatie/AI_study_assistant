@@ -92,6 +92,10 @@ async def expire_lapsed_subscriptions(user_id: uuid.UUID, db: AsyncSession) -> i
         subscription.is_in_retry_period = False
         subscription.retry_attempt_count = 0
         db.add(subscription)
+    
+    if stale_rows:
+        await db.commit()  # Commit expiration before creating new subscription
+    
     return len(stale_rows)
 
 

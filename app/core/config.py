@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     # Email sender settings (Resend)
     RESEND_API_KEY: str
     RESEND_FROM_EMAIL: str
+    SUPPORT_EMAIL: str = "support@knoledg.com"
 
     # Payment gateway settings
     PAYSTACK_SECRET_KEY: str
