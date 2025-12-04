@@ -437,7 +437,7 @@ async def _handle_subscription_deleted(event, db: AsyncSession, service: Subscri
         logger.warning(f"Subscription not found for stripe_subscription_id {subscription_id}")
         return
     
-    if sub.status == SubscriptionStatus.CANCELLED:
+    if sub.status == SubscriptionStatus.cancelled:
         logger.info(f"Subscription {sub.id} already cancelled")
         return
     
@@ -451,7 +451,7 @@ async def _handle_subscription_deleted(event, db: AsyncSession, service: Subscri
         logger.info(f"Subscription {sub.id} marked as cancelled after retry exhaustion")
     else:
         # User manually cancelled - just mark as cancelled
-        sub.status = SubscriptionStatus.CANCELLED
+        sub.status = SubscriptionStatus.cancelled
         sub.auto_renew = False
         db.add(sub)
         await db.commit()
