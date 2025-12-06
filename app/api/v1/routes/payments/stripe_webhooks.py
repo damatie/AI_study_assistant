@@ -450,14 +450,17 @@ async def _handle_subscription_deleted(event, db: AsyncSession, service: Subscri
         await service.downgrade_to_freemium(db, sub.user_id, reason="stripe_retries_exhausted")
         logger.info(f"Subscription {sub.id} marked as cancelled after retry exhaustion")
     else:
-        # User manually cancelled - just mark as cancelled
+        # User manually cancelled - mark subscription and downgrade to Freemium
         sub.status = SubscriptionStatus.cancelled
         sub.auto_renew = False
         db.add(sub)
-        await db.commit()
-        logger.info(f"Subscription {sub.id} marked as cancelled (user-initiated)")
+
         user = await db.get(User, sub.user_id)
         plan = await db.get(Plan, sub.plan_id)
+
+        await service.downgrade_to_freemium(db, sub.user_id, reason="stripe_manual_cancel")
+
+        logger.info(f"Subscription {sub.id} marked as cancelled (user-initiated)")
         if user:
             try:
                 await payment_notifications.send_cancellation_email(
