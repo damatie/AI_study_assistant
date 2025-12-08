@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -169,6 +169,12 @@ async def get_admin_metrics(db: AsyncSession = Depends(get_db)):
     ) or 0
     flash_cards_last_30 = await db.scalar(
         select(func.count(FlashCardSet.id)).where(FlashCardSet.created_at >= window_start)
+    ) or 0
+    
+    ai_questions_last_30 = await db.scalar(
+        select(func.coalesce(func.sum(UsageTracking.asked_questions_count), 0)).where(
+            UsageTracking.period_start >= window_start
+        )
     ) or 0
 
     daily_signups = await _daily_count_map(
@@ -405,6 +411,7 @@ async def get_admin_metrics(db: AsyncSession = Depends(get_db)):
             "materials": materials_last_30,
             "assessments": assessments_last_30,
             "flash_card_sets": flash_cards_last_30,
+            "ai_questions": int(ai_questions_last_30),
         },
         "plan_utilization": utilization,
         "plan_distribution": plan_distribution,
@@ -560,6 +567,7 @@ async def get_admin_users(
             User.last_name,
             User.email,
             User.is_email_verified,
+            User.is_active,
             User.created_at,
             Plan.name.label("plan_name"),
             Plan.sku.label("plan_sku"),
@@ -591,6 +599,7 @@ async def get_admin_users(
                 "sku": row.plan_sku,
             },
             "verified": row.is_email_verified,
+            "is_active": row.is_active,
             "created_at": _dt_to_iso(row.created_at),
             "has_active_subscription": (row.active_subscription_count or 0) > 0,
         }
@@ -787,3 +796,89 @@ async def send_admin_broadcast(
     broadcast = await service.send_broadcast(request, current_admin)
     data = BroadcastOut.model_validate(broadcast).model_dump()
     return success_response("Broadcast sent", data=data, status_code=201)
+
+
+@router.patch("/users/{user_id}/verify")
+async def verify_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually verify a user's email."""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.is_email_verified = True
+    db.add(user)
+    await db.commit()
+    
+    return success_response(
+        "User verified",
+        data={"user_id": str(user.id), "email": user.email, "verified": True}
+    )
+
+
+@router.patch("/users/{user_id}/block")
+async def block_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Block a user (set is_active to False)."""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.role == Role.admin:
+        raise HTTPException(status_code=400, detail="Cannot block admin users")
+    
+    user.is_active = False
+    db.add(user)
+    await db.commit()
+    
+    return success_response(
+        "User blocked",
+        data={"user_id": str(user.id), "email": user.email, "is_active": False}
+    )
+
+
+@router.patch("/users/{user_id}/unblock")
+async def unblock_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Unblock a user (set is_active to True)."""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.is_active = True
+    db.add(user)
+    await db.commit()
+    
+    return success_response(
+        "User unblocked",
+        data={"user_id": str(user.id), "email": user.email, "is_active": True}
+    )
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently delete a user and all related data."""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.role == Role.admin:
+        raise HTTPException(status_code=400, detail="Cannot delete admin users")
+    
+    email = user.email
+    await db.delete(user)
+    await db.commit()
+    
+    return success_response(
+        "User deleted",
+        data={"user_id": user_id, "email": email, "deleted": True}
+    )
