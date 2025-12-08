@@ -228,8 +228,15 @@ async def get_current_user(
         raise credentials_exception
 
     user = await db.get(User, user_id)
-    if user is None or not user.is_active:
+    if user is None:
         raise credentials_exception
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account has been blocked. Please contact support.",
+        )
+    
     return user
 
 
