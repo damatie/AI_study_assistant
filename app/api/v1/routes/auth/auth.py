@@ -4,10 +4,8 @@ import secrets
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.schemas.auth.auth_schema import EmailVerificationCodeRequest, LoginRequest, RefreshTokenRequest, Token
+from app.schemas.auth.auth_schema import EmailVerificationCodeRequest, LoginRequest, RefreshTokenRequest
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from jose import JWTError, jwt
 
 from app.db.deps import get_db
@@ -22,24 +20,14 @@ from app.schemas.auth.auth_schema import (
 from app.core.security import (
     create_refresh_token,
     get_password_hash,
-    require_roles,
     verify_password,
     create_access_token,
     verify_token,
-)
-from app.core.config import settings
-from app.models.user import User
-from app.models.plan import Plan
-from app.core.security import (
-    get_password_hash,
     generate_totp_secret,
     get_totp_code,
     verify_totp_code,
 )
-from app.services.mail_handler_service.mailer import (
-    send_verification_email,
-    # send_reset_password_email,
-)
+from app.models.plan import Plan
 from app.services.mail_handler_service.mailer_resend import (
     EmailError,
     get_email_delivery_error_message,
@@ -47,8 +35,7 @@ from app.services.mail_handler_service.mailer_resend import (
     send_verification_email,
     send_welcome_email,
 )
-
-
+from app.core.config import settings
 from app.core.response import error_response, success_response, ResponseModel
 from app.services.subscription_access import create_free_subscription
 
@@ -161,7 +148,15 @@ async def login(
             status_code=status.HTTP_403_FORBIDDEN
         )
 
-    # 5. All good—issue tokens
+    # 5. Account blocked
+    if not user.is_active:
+        return error_response(
+            msg="Your account has been blocked. Please contact support.",
+            data={"error_type": "ACCOUNT_BLOCKED"},
+            status_code=status.HTTP_403_FORBIDDEN
+        )
+
+    # 6. All good—issue tokens
     access_token = create_access_token(subject=str(user.id))
     refresh_token = create_refresh_token(subject=str(user.id))
 
@@ -238,18 +233,6 @@ async def get_current_user(
         )
     
     return user
-
-
-# helper to get user by email
-async def get_user_by_email(db: AsyncSession, email: str):
-    q = await db.execute(select(User).where(User.email == email))
-    return q.scalars().first()
-
-
-def generate_otp(length: int = 6) -> str:
-    # numeric OTP; adjust charset if you want alphanumeric
-    return "".join(secrets.choice("0123456789") for _ in range(length))
-
 
 ### Email verification endpoint
 @router.post("/verify-email", response_model=ResponseModel)

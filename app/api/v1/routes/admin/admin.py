@@ -567,6 +567,7 @@ async def get_admin_users(
             User.last_name,
             User.email,
             User.is_email_verified,
+            User.is_active,
             User.created_at,
             Plan.name.label("plan_name"),
             Plan.sku.label("plan_sku"),
@@ -598,6 +599,7 @@ async def get_admin_users(
                 "sku": row.plan_sku,
             },
             "verified": row.is_email_verified,
+            "is_active": row.is_active,
             "created_at": _dt_to_iso(row.created_at),
             "has_active_subscription": (row.active_subscription_count or 0) > 0,
         }
