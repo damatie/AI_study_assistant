@@ -309,6 +309,7 @@ class SubscriptionService:
         if existing_sub:
             existing_sub.status = SubscriptionStatus.cancelled
             existing_sub.period_end = now
+            existing_sub.auto_renew = False
             db.add(existing_sub)
             logger.info(f"Deactivated existing subscription: {existing_sub.id}")
         
