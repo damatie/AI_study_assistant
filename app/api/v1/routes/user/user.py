@@ -78,59 +78,64 @@ async def get_profile(
     from app.services.pricing.selection import pick_price_row
     amount = 0.0
     amount_currency = None
-    try:
-        if sub:
-            tx_q = await db.execute(
-                select(Transaction)
-                .where(
-                    Transaction.subscription_id == sub.id,
-                    Transaction.status == TransactionStatus.success,
-                )
-                .order_by(Transaction.created_at.desc())
-            )
-            txn = tx_q.scalars().first()
-            if txn and getattr(txn, 'amount_pence', None) is not None:
-                amount = float(txn.amount_pence) / 100.0
-                amount_currency = getattr(txn, 'currency', None)
 
-        if amount_currency is None:
-            # Fallback: latest successful transaction for this user, prefer matching plan if metadata present
-            tx_any_q = await db.execute(
-                select(Transaction)
-                .where(Transaction.user_id == current_user.id, Transaction.status == TransactionStatus.success)
-                .order_by(Transaction.created_at.desc())
-            )
-            any_txn = tx_any_q.scalars().first()
-            if any_txn and getattr(any_txn, 'amount_pence', None) is not None:
-                amount = float(any_txn.amount_pence) / 100.0
-                amount_currency = getattr(any_txn, 'currency', None)
-
-        if amount_currency is None:
-            # Fallback to a global/cheapest price row
-            rows = getattr(plan, 'prices', []) or []
-            chosen = None
-            try:
-                # Prefer a global price row for any currency; pick the cheapest among active ones
-                globals_only = [
-                    r for r in rows
-                    if (getattr(getattr(r, 'scope_type', None), 'value', getattr(r, 'scope_type', None)) == 'global')
-                    and getattr(r, 'active', False)
-                ]
-                if globals_only:
-                    chosen = sorted(globals_only, key=lambda r: r.price_minor)[0]
-                else:
-                    # As a fallback of last resort, pick the absolute cheapest active row
-                    actives = [r for r in rows if getattr(r, 'active', False)]
-                    if actives:
-                        chosen = sorted(actives, key=lambda r: r.price_minor)[0]
-            except Exception:
-                chosen = None
-            if chosen:
-                amount = float(chosen.price_minor) / 100.0
-                amount_currency = getattr(chosen, 'currency', None)
-    except Exception:
+    if (plan.sku or '').upper() == 'FREEMIUM':
         amount = 0.0
         amount_currency = None
+    else:
+        try:
+            if sub:
+                tx_q = await db.execute(
+                    select(Transaction)
+                    .where(
+                        Transaction.subscription_id == sub.id,
+                        Transaction.status == TransactionStatus.success,
+                    )
+                    .order_by(Transaction.created_at.desc())
+                )
+                txn = tx_q.scalars().first()
+                if txn and getattr(txn, 'amount_pence', None) is not None:
+                    amount = float(txn.amount_pence) / 100.0
+                    amount_currency = getattr(txn, 'currency', None)
+
+            if amount_currency is None:
+                # Fallback: latest successful transaction for this user, prefer matching plan if metadata present
+                tx_any_q = await db.execute(
+                    select(Transaction)
+                    .where(Transaction.user_id == current_user.id, Transaction.status == TransactionStatus.success)
+                    .order_by(Transaction.created_at.desc())
+                )
+                any_txn = tx_any_q.scalars().first()
+                if any_txn and getattr(any_txn, 'amount_pence', None) is not None:
+                    amount = float(any_txn.amount_pence) / 100.0
+                    amount_currency = getattr(any_txn, 'currency', None)
+
+            if amount_currency is None:
+                # Fallback to a global/cheapest price row
+                rows = getattr(plan, 'prices', []) or []
+                chosen = None
+                try:
+                    # Prefer a global price row for any currency; pick the cheapest among active ones
+                    globals_only = [
+                        r for r in rows
+                        if (getattr(getattr(r, 'scope_type', None), 'value', getattr(r, 'scope_type', None)) == 'global')
+                        and getattr(r, 'active', False)
+                    ]
+                    if globals_only:
+                        chosen = sorted(globals_only, key=lambda r: r.price_minor)[0]
+                    else:
+                        # As a fallback of last resort, pick the absolute cheapest active row
+                        actives = [r for r in rows if getattr(r, 'active', False)]
+                        if actives:
+                            chosen = sorted(actives, key=lambda r: r.price_minor)[0]
+                except Exception:
+                    chosen = None
+                if chosen:
+                    amount = float(chosen.price_minor) / 100.0
+                    amount_currency = getattr(chosen, 'currency', None)
+        except Exception:
+            amount = 0.0
+            amount_currency = None
 
     # 5. Derive subscription display fields
     # Freemium if SKU says so
