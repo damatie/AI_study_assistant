@@ -28,8 +28,6 @@ from app.schemas.admin.broadcasts import (
 )
 from app.services.admin.broadcast_service import BroadcastService
 from app.utils.enums import BillingInterval, SubscriptionStatus, TransactionStatus
-
-METRIC_LOOKBACK_DAYS = 30
 RECENT_LIMIT = 10
 
 admin_guard = require_roles(Role.admin)
@@ -86,13 +84,15 @@ async def _daily_count_map(
     *,
     column,
     entity_id,
-    start_at: datetime,
+    start_at: Optional[datetime],
     extra_filters: Optional[List[Any]] = None,
 ):
     """Return a mapping of day -> count for the given column within the window."""
 
     bucket = func.date_trunc("day", column).label("bucket")
-    stmt = select(bucket, func.count(entity_id)).where(column >= start_at)
+    stmt = select(bucket, func.count(entity_id))
+    if start_at:
+        stmt = stmt.where(column >= start_at)
     if extra_filters:
         for condition in extra_filters:
             stmt = stmt.where(condition)
@@ -112,11 +112,13 @@ async def _daily_sum_map(
     *,
     column,
     value_column,
-    start_at: datetime,
+    start_at: Optional[datetime],
     extra_filters: Optional[List[Any]] = None,
 ):
     bucket = func.date_trunc("day", column).label("bucket")
-    stmt = select(bucket, func.coalesce(func.sum(value_column), 0)).where(column >= start_at)
+    stmt = select(bucket, func.coalesce(func.sum(value_column), 0))
+    if start_at:
+        stmt = stmt.where(column >= start_at)
     if extra_filters:
         for condition in extra_filters:
             stmt = stmt.where(condition)
@@ -132,11 +134,27 @@ async def _daily_sum_map(
 
 
 @router.get("/metrics")
-async def get_admin_metrics(db: AsyncSession = Depends(get_db)):
+async def get_admin_metrics(
+    window: str = Query("30", description="Window in days or 'all' for full history"),
+    db: AsyncSession = Depends(get_db),
+):
     """Return aggregate metrics for the dashboard cards."""
 
     now = datetime.now(timezone.utc)
-    window_start = now - timedelta(days=METRIC_LOOKBACK_DAYS)
+
+    if window.lower() == "all":
+        window_days: Optional[int] = None
+        window_start: Optional[datetime] = None
+        window_label = "All"
+    else:
+        try:
+            window_days = int(window)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid window")
+        if window_days not in {30, 60, 90}:
+            raise HTTPException(status_code=400, detail="Unsupported window")
+        window_start = now - timedelta(days=window_days)
+        window_label = f"{window_days}d"
 
     total_users = await db.scalar(select(func.count(User.id))) or 0
     verified_users = await db.scalar(
@@ -155,25 +173,49 @@ async def get_admin_metrics(db: AsyncSession = Depends(get_db)):
                 SubscriptionStatus.cancelled,
                 SubscriptionStatus.expired,
             ]),
-            Subscription.updated_at >= window_start,
+            *(
+                [Subscription.updated_at >= window_start]
+                if window_start is not None
+                else []
+            ),
         )
     ) or 0
 
-    materials_last_30 = await db.scalar(
-        select(func.count(StudyMaterial.id)).where(StudyMaterial.created_at >= window_start)
-    ) or 0
-    assessments_last_30 = await db.scalar(
-        select(func.count(AssessmentSession.id)).where(
-            AssessmentSession.created_at >= window_start
+    materials_in_window = await db.scalar(
+        select(func.count(StudyMaterial.id)).where(
+            *(
+                [StudyMaterial.created_at >= window_start]
+                if window_start is not None
+                else []
+            )
         )
     ) or 0
-    flash_cards_last_30 = await db.scalar(
-        select(func.count(FlashCardSet.id)).where(FlashCardSet.created_at >= window_start)
+    assessments_in_window = await db.scalar(
+        select(func.count(AssessmentSession.id)).where(
+            *(
+                [AssessmentSession.created_at >= window_start]
+                if window_start is not None
+                else []
+            )
+        )
     ) or 0
-    
-    ai_questions_last_30 = await db.scalar(
+    flash_cards_in_window = await db.scalar(
+        select(func.count(FlashCardSet.id)).where(
+            *(
+                [FlashCardSet.created_at >= window_start]
+                if window_start is not None
+                else []
+            )
+        )
+    ) or 0
+
+    ai_questions_in_window = await db.scalar(
         select(func.coalesce(func.sum(UsageTracking.asked_questions_count), 0)).where(
-            UsageTracking.period_start >= window_start
+            *(
+                [UsageTracking.period_start >= window_start]
+                if window_start is not None
+                else []
+            )
         )
     ) or 0
 
@@ -345,10 +387,34 @@ async def get_admin_metrics(db: AsyncSession = Depends(get_db)):
         reverse=True,
     )[:5]
 
-    timeline_days = _build_day_range(window_start, now)
+    all_daily_maps = [
+        daily_signups,
+        daily_material_uploads,
+        daily_assessments,
+        daily_flash_cards,
+        daily_subscription_activations,
+        daily_subscription_cancellations,
+        daily_revenue_pence,
+    ]
+    earliest_bucket = None
+    for bucket_map in all_daily_maps:
+        if bucket_map:
+            candidate = min(bucket_map.keys())
+            earliest_bucket = (
+                candidate
+                if earliest_bucket is None or candidate < earliest_bucket
+                else earliest_bucket
+            )
+
+    range_start = (
+        window_start.date() if window_start else earliest_bucket or now.date()
+    )
+    timeline_days = _build_day_range(
+        datetime.combine(range_start, datetime.min.time(), tzinfo=timezone.utc), now
+    )
     time_series: List[Dict[str, Any]] = []
     revenue_time_series: List[Dict[str, Any]] = []
-    revenue_last_30_total_pence = sum(daily_revenue_pence.values())
+    revenue_window_total_pence = sum(daily_revenue_pence.values())
     for day in timeline_days:
         day_iso = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc).isoformat()
         time_series.append(
@@ -403,15 +469,19 @@ async def get_admin_metrics(db: AsyncSession = Depends(get_db)):
             "verified_users": verified_users,
             "unverified_users": unverified_users,
         },
+        "window": {
+            "label": window_label,
+            "days": window_days,
+        },
         "subscriptions": {
             "active": active_subscriptions,
-            "churned_last_30_days": churned_subscriptions,
+            "churned_in_window": churned_subscriptions,
         },
-        "usage_last_30_days": {
-            "materials": materials_last_30,
-            "assessments": assessments_last_30,
-            "flash_card_sets": flash_cards_last_30,
-            "ai_questions": int(ai_questions_last_30),
+        "usage_window": {
+            "materials": materials_in_window,
+            "assessments": assessments_in_window,
+            "flash_card_sets": flash_cards_in_window,
+            "ai_questions": int(ai_questions_in_window),
         },
         "plan_utilization": utilization,
         "plan_distribution": plan_distribution,
@@ -420,7 +490,7 @@ async def get_admin_metrics(db: AsyncSession = Depends(get_db)):
             "currency": revenue_currency,
             "current_month_total": _pence_to_major(current_month_revenue_pence),
             "previous_month_total": _pence_to_major(previous_month_revenue_pence),
-            "last_30_days_total": _pence_to_major(revenue_last_30_total_pence),
+            "window_total": _pence_to_major(revenue_window_total_pence),
             "change_percentage": revenue_change_pct,
             "time_series": revenue_time_series,
         },
