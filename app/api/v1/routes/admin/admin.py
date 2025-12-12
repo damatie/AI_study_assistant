@@ -136,11 +136,13 @@ async def _daily_sum_map(
 @router.get("/metrics")
 async def get_admin_metrics(
     window: str = Query("30", description="Window in days or 'all' for full history"),
+    currency: str = Query("GBP", description="Currency code for revenue metrics (GBP, USD, NGN)"),
     db: AsyncSession = Depends(get_db),
 ):
     """Return aggregate metrics for the dashboard cards."""
 
     now = datetime.now(timezone.utc)
+    currency = currency.upper()
 
     if window.lower() == "all":
         window_days: Optional[int] = None
@@ -265,16 +267,13 @@ async def get_admin_metrics(
         column=Transaction.created_at,
         value_column=Transaction.amount_pence,
         start_at=window_start,
-        extra_filters=[Transaction.status == TransactionStatus.success],
+        extra_filters=[
+            Transaction.status == TransactionStatus.success,
+            Transaction.currency == currency,
+        ],
     )
 
-    revenue_currency = await db.scalar(
-        select(Transaction.currency)
-        .where(Transaction.status == TransactionStatus.success)
-        .order_by(Transaction.created_at.desc())
-    )
-    if not revenue_currency:
-        revenue_currency = "USD"
+    revenue_currency = currency
 
     current_month_start = _month_start(now)
     previous_month_start = _month_start(current_month_start - timedelta(days=1))
@@ -282,6 +281,7 @@ async def get_admin_metrics(
     current_month_revenue_pence = await db.scalar(
         select(func.coalesce(func.sum(Transaction.amount_pence), 0)).where(
             Transaction.status == TransactionStatus.success,
+            Transaction.currency == currency,
             Transaction.created_at >= current_month_start,
         )
     )
@@ -290,6 +290,7 @@ async def get_admin_metrics(
     previous_month_revenue_pence = await db.scalar(
         select(func.coalesce(func.sum(Transaction.amount_pence), 0)).where(
             Transaction.status == TransactionStatus.success,
+            Transaction.currency == currency,
             Transaction.created_at >= previous_month_start,
             Transaction.created_at < current_month_start,
         )
